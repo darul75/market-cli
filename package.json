@@ -1,0 +1,27 @@
+{
+  "name": "cac40-monitor",
+  "version": "1.0.0",
+  "description": "Real-time CAC40 stock monitoring CLI with OpenTUI and RxJS",
+  "main": "src/main.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "build": "bun build src/main.ts --outdir=dist --target=node",
+    "start": "bun run dist/main.js",
+    "test": "bun test",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opentui/core": "latest",
+    "rxjs": "^7.8.1",
+    "axios": "^1.6.8"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.3.3",
+    "@types/node": "^20.11.0"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}

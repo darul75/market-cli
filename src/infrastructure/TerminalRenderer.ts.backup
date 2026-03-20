@@ -1,0 +1,452 @@
+import { createCliRenderer, Box, Text, CliRenderer } from '@opentui/core';
+import { Stock, MarketData } from '../domain/index.js';
+import { AppStatus } from '../application/StockMonitorApp.js';
+
+/**
+ * Interface for loading progress information
+ */
+export interface LoadingProgress {
+  currentBatch: number;
+  totalBatches: number;
+  completedStocks: number;
+  totalStocks: number;
+  currentBatchStocks: string[];
+  successCount: number;
+  errorCount: number;
+  recentErrors: string[];
+  elapsedTime: number;
+}
+
+/**
+ * OpenTUI terminal renderer for the stock monitoring interface
+ */
+export class TerminalRenderer {
+  private renderer!: CliRenderer;
+  private isInitialized = false;
+
+  /**
+   * Initialize the renderer
+   */
+  async initialize(): Promise<void> {
+    try {
+      console.log('🎨 Initializing OpenTUI renderer...');
+      this.renderer = await createCliRenderer({
+        exitOnCtrlC: true
+      });
+      this.isInitialized = true;
+      console.log('✅ OpenTUI renderer initialized successfully');
+    } catch (error) {
+      console.error('❌ Failed to initialize OpenTUI renderer:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear the screen before rendering new content
+   */
+  private clearScreen(): void {
+    if (!this.isInitialized) return;
+    
+    // Remove all existing children from the root
+    const children = this.renderer.root.getChildren();
+    children.forEach(child => {
+      if (child.id) {
+        this.renderer.root.remove(child.id);
+      }
+    });
+  }
+
+  /**
+   * Render the main stock monitoring interface
+   */
+  renderStockTable(marketData: MarketData, status: AppStatus): void {
+    if (!this.isInitialized) {
+      throw new Error('Renderer not initialized. Call initialize() first.');
+    }
+
+    // Clear previous content first
+    this.clearScreen();
+
+    // Create and add main container to root
+    this.renderer.root.add(
+      Box(
+        {
+          width: '100%',
+          height: '100%',
+          flexDirection: 'column',
+          padding: 1
+        },
+        // Header
+        this.createHeader(status),
+        // Market summary
+        this.createMarketSummary(marketData),
+        // Stock table
+        this.createStockTable(marketData.stocks),
+        // Footer
+        this.createFooter(status)
+      )
+    );
+  }
+
+  /**
+   * Render loading state with progress information
+   */
+  renderLoading(progress?: LoadingProgress): void {
+    if (!this.isInitialized) return;
+    
+    // Clear previous content first
+    this.clearScreen();
+    
+    const progressElements: any[] = [];
+    
+    // Main loading message
+    progressElements.push(
+      Text({
+        content: '🔄 Loading CAC40 Data...',
+        fg: '#00FF00'
+      })
+    );
+    
+    // Add progress info if available
+    if (progress) {
+      progressElements.push(
+        Box(
+          {
+            width: '80%',
+            flexDirection: 'column',
+            alignItems: 'center',
+            marginTop: 2,
+            borderStyle: 'single',
+            borderColor: '#333333',
+            padding: 1
+          },
+          Text({
+            content: `Batch ${progress.currentBatch}/${progress.totalBatches}`,
+            fg: '#FFFFFF'
+          }),
+          Text({
+            content: `Stocks: ${progress.completedStocks}/${progress.totalStocks}`,
+            fg: '#00BFFF'
+          }),
+          ...(progress.currentBatchStocks.length > 0 ? [
+            Text({
+              content: `Processing: ${progress.currentBatchStocks.join(', ')}`,
+              fg: '#CCCCCC'
+            })
+          ] : []),
+          Box(
+            {
+              flexDirection: 'row',
+              gap: 3,
+              marginTop: 1
+            },
+            Text({
+              content: `✅ Success: ${progress.successCount}`,
+              fg: '#00FF00'
+            }),
+            Text({
+              content: `❌ Errors: ${progress.errorCount}`,
+              fg: '#FF0000'
+            })
+          ),
+          ...(progress.recentErrors.length > 0 ? [
+            Box(
+              {
+                width: '100%',
+                flexDirection: 'column',
+                marginTop: 1,
+                borderStyle: 'single',
+                borderColor: '#FF0000',
+                padding: 1
+              },
+              Text({
+                content: 'Recent Errors:',
+                fg: '#FF0000'
+              }),
+              ...progress.recentErrors.slice(0, 3).map((error: string) => 
+                Text({
+                  content: error,
+                  fg: '#FF6B6B'
+                })
+              )
+            )
+          ] : []),
+          Text({
+            content: `Elapsed: ${progress.elapsedTime}s`,
+            fg: '#AAAAAA'
+          })
+        )
+      );
+    }
+    
+    // Add instructions
+    progressElements.push(
+      Box(
+        {
+          marginTop: 2,
+          flexDirection: 'column',
+          alignItems: 'center'
+        },
+        Text({
+          content: 'Please wait while we fetch live market data...',
+          fg: '#CCCCCC'
+        }),
+        Text({
+          content: 'Press Ctrl+C to cancel',
+          fg: '#AAAAAA'
+        })
+      )
+    );
+    
+    this.renderer.root.add(
+      Box(
+        {
+          width: '100%',
+          height: '100%',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: 2
+        },
+        ...progressElements
+      )
+    );
+  }
+
+  /**
+   * Render error state
+   */
+  renderError(error: string): void {
+    if (!this.isInitialized) return;
+    
+    // Clear previous content first
+    this.clearScreen();
+    
+    this.renderer.root.add(
+      Box(
+        {
+          width: '100%',
+          height: '100%',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: 2
+        },
+        Text({
+          content: '❌ API Connection Failed',
+          fg: '#FF0000'
+        }),
+        Text({
+          content: error,
+          fg: '#FF6B6B'
+        }),
+        Text({
+          content: 'Press Ctrl+C to exit',
+          fg: '#CCCCCC'
+        })
+      )
+    );
+  }
+
+  /**
+   * Create header component
+   */
+  private createHeader(status: AppStatus) {
+    return Box(
+      {
+        width: '100%',
+        height: 3,
+        borderStyle: 'single',
+        borderColor: '#00FF00',
+        padding: 1,
+        flexDirection: 'column'
+      },
+      Box(
+        {
+          width: '100%',
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        },
+        Text({
+          content: '📈 CAC40 Live Monitor',
+          fg: '#00FF00'
+        }),
+        Text({
+          content: this.getStatusIndicator(status),
+          fg: status.isConnected ? '#00FF00' : '#FF0000'
+        })
+      )
+    );
+  }
+
+  /**
+   * Create market summary component
+   */
+  private createMarketSummary(marketData: MarketData) {
+    const summary = marketData.getSummary();
+    
+    return Box(
+      {
+        width: '100%',
+        height: 2,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      },
+      Box(
+        {
+          flexDirection: 'row',
+          gap: 4
+        },
+        Text({
+          content: `Stocks: ${summary.totalStocks}`,
+          fg: '#FFFFFF'
+        }),
+        Text({
+          content: `↑ ${summary.gainers}`,
+          fg: '#00FF00'
+        }),
+        Text({
+          content: `↓ ${summary.losers}`,
+          fg: '#FF0000'
+        })
+      ),
+      Text({
+        content: `Sentiment: ${summary.sentiment}`,
+        fg: this.getSentimentColor(summary.sentiment)
+      })
+    );
+  }
+
+  /**
+   * Create stock table component
+   */
+  private createStockTable(stocks: Stock[]) {
+    // Table header
+    const headerRow = this.createTableHeader();
+    
+    // Stock rows (limit to first 10 to fit screen)
+    const displayStocks = stocks.slice(0, 10);
+    const stockRows = displayStocks.map((stock, index) => 
+      this.createStockRow(stock, index + 1)
+    );
+
+    return Box(
+      {
+        width: '100%',
+        flexDirection: 'column',
+        borderStyle: 'single',
+        borderColor: '#666666',
+        flexGrow: 1
+      },
+      headerRow,
+      ...stockRows
+    );
+  }
+
+  /**
+   * Create table header
+   */
+  private createTableHeader() {
+    return Box(
+      {
+        width: '100%',
+        height: 1,
+        backgroundColor: '#333333',
+        flexDirection: 'row',
+        padding: 1
+      },
+      Text({ content: '#', width: 3, fg: '#FFFFFF' }),
+      Text({ content: 'Symbol', width: 12, fg: '#FFFFFF' }),
+      Text({ content: 'Name', width: 20, fg: '#FFFFFF' }),
+      Text({ content: 'Price', width: 10, fg: '#FFFFFF' }),
+      Text({ content: 'Change', width: 8, fg: '#FFFFFF' }),
+      Text({ content: '%Change', width: 8, fg: '#FFFFFF' }),
+      Text({ content: 'Volume', width: 10, fg: '#FFFFFF' })
+    );
+  }
+
+  /**
+   * Create individual stock row
+   */
+  private createStockRow(stock: Stock, index: number) {
+    // Truncate name if too long
+    const truncatedName = stock.name.length > 18 ? 
+      stock.name.substring(0, 18) + '..' : stock.name;
+    
+    const changeColor = stock.isPositive ? '#00FF00' : '#FF0000';
+
+    return Box(
+      {
+        width: '100%',
+        height: 1,
+        flexDirection: 'row',
+        padding: 1
+      },
+      Text({ content: index.toString(), width: 3, fg: '#CCCCCC' }),
+      Text({ content: stock.symbol, width: 12, fg: '#00BFFF' }),
+      Text({ content: truncatedName, width: 20, fg: '#FFFFFF' }),
+      Text({ content: stock.price.toString(), width: 10, fg: '#FFFFFF' }),
+      Text({ content: stock.formattedPriceChange, width: 8, fg: changeColor }),
+      Text({ content: stock.formattedPercentageChange, width: 8, fg: changeColor }),
+      Text({ content: stock.formattedVolume, width: 10, fg: '#CCCCCC' })
+    );
+  }
+
+  /**
+   * Create footer component
+   */
+  private createFooter(status: AppStatus) {
+    const lastUpdate = status.lastUpdate ? 
+      `Last: ${status.lastUpdate.toLocaleTimeString()}` : 'Never';
+
+    return Box(
+      {
+        width: '100%',
+        height: 1,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      },
+      Text({
+        content: lastUpdate,
+        fg: '#CCCCCC'
+      }),
+      Text({
+        content: 'Press Ctrl+C to exit',
+        fg: '#CCCCCC'
+      })
+    );
+  }
+
+  /**
+   * Get status indicator text
+   */
+  private getStatusIndicator(status: AppStatus): string {
+    if (status.isLoading) return '🔄 UPDATING';
+    if (status.hasError) return '❌ ERROR';
+    if (status.isConnected) return '🟢 LIVE';
+    return '🔴 OFFLINE';
+  }
+
+  /**
+   * Get color for market sentiment
+   */
+  private getSentimentColor(sentiment: string): string {
+    switch (sentiment) {
+      case 'BULLISH': return '#00FF00';
+      case 'BEARISH': return '#FF0000';
+      default: return '#FFA500';
+    }
+  }
+
+  /**
+   * Cleanup resources
+   */
+  destroy(): void {
+    if (this.isInitialized) {
+      console.log('🧹 Renderer cleaned up');
+    }
+  }
+}
