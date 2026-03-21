@@ -148,19 +148,106 @@ export class TerminalRenderer {
       this.selectedSymbol = stock.symbol;
     }
     
-    // Re-render with new selection state
-    if (this.marketData) {
-      this.renderStockTable(this.marketData, {
-        isLoading: false,
-        hasError: false,
-        error: null,
-        isConnected: true,
-        lastUpdate: new Date(),
-        stockCount: this.marketData.stocks.length,
-        isRunning: true,
-        appTitle: 'CAC40 Live Monitor'
-      });
+    // Re-render with cached status (preserves timestamp)
+    this.renderWithCurrentStatus();
+  }
+
+  /**
+   * Re-render with cached data and status (preserves timestamp)
+   */
+  private renderWithCurrentStatus(): void {
+    if (this.marketData && this.currentStatus) {
+      this.renderStockTable(this.marketData, this.currentStatus);
     }
+  }
+
+  /**
+   * Create an action button (move up, move down, delete)
+   */
+  private createActionButton(
+    symbol: string,
+    color: string,
+    handler: () => void,
+    isVisible: boolean = true
+  ) {
+    if (!isVisible) {
+      // Invisible button (transparent, preserves layout)
+      return Box(
+        {
+          width: 1,
+          height: 1,
+          backgroundColor: 'transparent'
+        },
+        Text({ content: ' ', width: 1 })
+      );
+    }
+    
+    // Visible button: colored symbol with click handler
+    return Box(
+      {
+        width: 1,
+        height: 1,
+        onMouseDown: (event) => {
+          event.stopPropagation(); // Prevent row selection handler
+          handler();
+        }
+      },
+      Text({ content: symbol, width: 1, fg: color })
+    );
+  }
+
+  /**
+   * Handle move up action
+   */
+  private handleMoveUp(index: number): void {
+    // Don't do anything if already at top
+    if (index <= 0) return;
+    
+    // Swap with previous element
+    const temp = this.marketData!.stocks[index];
+    this.marketData!.stocks[index] = this.marketData!.stocks[index - 1];
+    this.marketData!.stocks[index - 1] = temp;
+    
+    // Update selection to follow moved item
+    this.selectedIndex = index - 1;
+    
+    // Re-render
+    this.renderWithCurrentStatus();
+  }
+
+  /**
+   * Handle move down action
+   */
+  private handleMoveDown(index: number): void {
+    // Don't do anything if already at bottom
+    if (index >= this.marketData!.stocks.length - 1) return;
+    
+    // Swap with next element
+    const temp = this.marketData!.stocks[index];
+    this.marketData!.stocks[index] = this.marketData!.stocks[index + 1];
+    this.marketData!.stocks[index + 1] = temp;
+    
+    // Update selection to follow moved item
+    this.selectedIndex = index + 1;
+    
+    // Re-render
+    this.renderWithCurrentStatus();
+  }
+
+  /**
+   * Handle delete action
+   */
+  private handleDelete(index: number): void {
+    // Remove stock from array
+    this.marketData!.stocks.splice(index, 1);
+    
+    // Adjust selection if needed
+    if (this.selectedIndex >= this.marketData!.stocks.length) {
+      this.selectedIndex = Math.max(0, this.marketData!.stocks.length - 1);
+    }
+    
+    // Re-render
+    this.renderWithCurrentStatus();
   }
 
   /**
@@ -193,8 +280,9 @@ export class TerminalRenderer {
       throw new Error('Renderer not initialized. Call initialize() first.');
     }
 
-    // Cache market data for re-rendering when selection changes
+    // Cache data for re-rendering when selection changes
     this.marketData = marketData;
+    this.currentStatus = status; // Cache status to prevent timestamp updates on selection
 
     // Clear previous content first
     this.clearScreen();
@@ -535,6 +623,38 @@ export class TerminalRenderer {
     
     // Brighter symbol color when selected
     const symbolColor = isSelected ? '#00FFFF' : '#00BFFF';
+    
+    // Create action buttons (only visible when selected)
+    const moveUpButton = this.createActionButton(
+      '▲',
+      '#00FF00',
+      () => this.handleMoveUp(index - 1), // Convert to 0-based index
+      isSelected
+    );
+    
+    const moveDownButton = this.createActionButton(
+      '▼',
+      '#FFFF00',
+      () => this.handleMoveDown(index - 1),
+      isSelected
+    );
+    
+    const deleteButton = this.createActionButton(
+      '✕',
+      '#FF0000',
+      () => this.handleDelete(index - 1),
+      isSelected
+    );
+    
+    // Spacer between buttons
+    const buttonSpacer = Box(
+      {
+        width: 1,
+        height: 1,
+        backgroundColor: 'transparent'
+      },
+      Text({ content: ' ', width: 1 })
+    );
 
     return Box(
       {
@@ -557,7 +677,12 @@ export class TerminalRenderer {
       Text({ content: stock.price.toString(), width: 10, fg: '#FFFFFF' }),
       Text({ content: stock.formattedPriceChange, width: 8, fg: changeColor }),
       Text({ content: stock.formattedPercentageChange, width: 8, fg: changeColor }),
-      Text({ content: stock.formattedVolume, width: 10, fg: '#CCCCCC' })
+      Text({ content: stock.formattedVolume, width: 10, fg: '#CCCCCC' }),
+      moveUpButton,
+      buttonSpacer,
+      moveDownButton,
+      buttonSpacer,
+      deleteButton
     );
   }
 
