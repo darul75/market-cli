@@ -26,6 +26,10 @@ export class TerminalRenderer {
   private scrollPosition = 0; // Track scroll position for preservation during refresh
   private resizeTimeout?: NodeJS.Timeout; // For debounced resize handling
   private relativeScrollPosition = 0; // Relative scroll position (0-1) for resize preservation
+  private selectedIndex: number = -1; // Currently selected row (-1 = none)
+  private selectedSymbol: string | null = null; // Currently selected stock symbol
+  private marketData: MarketData | null = null; // Cache for re-rendering
+  private currentStatus: AppStatus | null = null; // Cache current status for re-rendering
 
   /**
    * Initialize the renderer
@@ -34,7 +38,10 @@ export class TerminalRenderer {
     try {
       console.log('🎨 Initializing OpenTUI renderer...');
       this.renderer = await createCliRenderer({
-        exitOnCtrlC: true
+        exitOnCtrlC: true,
+        useMouse: true, // Enable mouse events
+        autoFocus: true, // Focus nearest focusable on left click
+        enableMouseMovement: true // Enable hover tracking
       });
       this.isInitialized = true;
       
@@ -129,12 +136,65 @@ export class TerminalRenderer {
   }
 
   /**
+   * Handle row click to toggle selection
+   */
+  private handleRowClick(stock: Stock, index: number): void {
+    // Toggle selection: if already selected, deselect
+    if (this.selectedIndex === index) {
+      this.selectedIndex = -1;
+      this.selectedSymbol = null;
+    } else {
+      this.selectedIndex = index;
+      this.selectedSymbol = stock.symbol;
+    }
+    
+    // Re-render with new selection state
+    if (this.marketData) {
+      this.renderStockTable(this.marketData, {
+        isLoading: false,
+        hasError: false,
+        error: null,
+        isConnected: true,
+        lastUpdate: new Date(),
+        stockCount: this.marketData.stocks.length,
+        isRunning: true,
+        appTitle: 'CAC40 Live Monitor'
+      });
+    }
+  }
+
+  /**
+   * Get currently selected row index
+   */
+  public getSelectedIndex(): number {
+    return this.selectedIndex;
+  }
+
+  /**
+   * Get currently selected stock symbol
+   */
+  public getSelectedSymbol(): string | null {
+    return this.selectedSymbol;
+  }
+
+  /**
+   * Clear current selection
+   */
+  public clearSelection(): void {
+    this.selectedIndex = -1;
+    this.selectedSymbol = null;
+  }
+
+  /**
    * Render the main stock monitoring interface
    */
   renderStockTable(marketData: MarketData, status: AppStatus): void {
     if (!this.isInitialized) {
       throw new Error('Renderer not initialized. Call initialize() first.');
     }
+
+    // Cache market data for re-rendering when selection changes
+    this.marketData = marketData;
 
     // Clear previous content first
     this.clearScreen();
@@ -404,7 +464,7 @@ export class TerminalRenderer {
     
     // Create scrollable stock rows with zebra striping
     const stockRows = stocks.map((stock, index) => 
-      this.createStockRow(stock, index + 1, index % 2 === 0)
+      this.createStockRow(stock, index + 1, index % 2 === 0, index === this.selectedIndex)
     );
 
     // Create scrollable container for stock rows
@@ -456,28 +516,43 @@ export class TerminalRenderer {
   }
 
   /**
-   * Create individual stock row with zebra striping
+   * Create individual stock row with zebra striping and selection support
    */
-  private createStockRow(stock: Stock, index: number, isEvenRow: boolean = false) {
+  private createStockRow(stock: Stock, index: number, isEvenRow: boolean = false, isSelected: boolean = false) {
     // Truncate name if too long
     const truncatedName = stock.name.length > 18 ? 
       stock.name.substring(0, 18) + '..' : stock.name;
     
     const changeColor = stock.isPositive ? '#00FF00' : '#FF0000';
     
-    // Zebra stripe background colors using terminal-friendly colors
-    const backgroundColor = isEvenRow ? '#2a2a2a' : '#1a1a1a';
+    // Determine background color based on selection state
+    let backgroundColor: string;
+    if (isSelected) {
+      backgroundColor = '#0055AA'; // Blue background for selected row
+    } else {
+      backgroundColor = isEvenRow ? '#2a2a2a' : '#1a1a1a'; // Zebra striping
+    }
+    
+    // Brighter symbol color when selected
+    const symbolColor = isSelected ? '#00FFFF' : '#00BFFF';
 
     return Box(
       {
+        id: `stock-row-${stock.symbol}-${index}`,
         width: '100%',
         height: 1,
         flexDirection: 'row',
         padding: 1,
-        backgroundColor
+        backgroundColor,
+        focusable: true,
+        onMouseDown: (event) => {
+          if (event.button === 0) { // Left click only
+            this.handleRowClick(stock, index - 1); // Convert to 0-based index
+          }
+        }
       },
       Text({ content: index.toString(), width: 3, fg: '#CCCCCC' }),
-      Text({ content: stock.symbol, width: 12, fg: '#00BFFF' }),
+      Text({ content: stock.symbol, width: 12, fg: symbolColor }),
       Text({ content: truncatedName, width: 20, fg: '#FFFFFF' }),
       Text({ content: stock.price.toString(), width: 10, fg: '#FFFFFF' }),
       Text({ content: stock.formattedPriceChange, width: 8, fg: changeColor }),

@@ -20,22 +20,22 @@ export class YahooFinanceClient {
     'ALO.PA',    // Alstom
     'MT.AS',     // ArcelorMittal
     'BNP.PA',    // BNP Paribas
-    'EN.PA',     // Bouygues
-    'CAP.PA',    // Capgemini
-    'CA.PA',     // Carrefour
-    'ACA.PA',    // Crédit Agricole
-    'BN.PA',     // Danone
-    'ENGI.PA',   // Engie
-    'RMS.PA',    // Hermès
-    'KER.PA',    // Kering
-    'MC.PA',     // LVMH (Correct symbol)
-    'OR.PA',     // L'Oréal
-    'RI.PA',     // Pernod Ricard
-    'SAF.PA',    // Safran
-    'SAN.PA',    // Sanofi
-    'GLE.PA',    // Société Générale
-    'TTE.PA',    // TotalEnergies (Updated from FP.PA)
-    'VIV.PA'     // Vivendi
+    // 'EN.PA',     // Bouygues
+    // 'CAP.PA',    // Capgemini
+    // 'CA.PA',     // Carrefour
+    // 'ACA.PA',    // Crédit Agricole
+    // 'BN.PA',     // Danone
+    // 'ENGI.PA',   // Engie
+    // 'RMS.PA',    // Hermès
+    // 'KER.PA',    // Kering
+    // 'MC.PA',     // LVMH (Correct symbol)
+    // 'OR.PA',     // L'Oréal
+    // 'RI.PA',     // Pernod Ricard
+    // 'SAF.PA',    // Safran
+    // 'SAN.PA',    // Sanofi
+    // 'GLE.PA',    // Société Générale
+    // 'TTE.PA',    // TotalEnergies (Updated from FP.PA)
+    // 'VIV.PA'     // Vivendi
   ];
 
   /**
