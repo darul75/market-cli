@@ -1,6 +1,7 @@
 import { createCliRenderer, Box, Text, CliRenderer, ScrollBox } from '@opentui/core';
 import { Stock, MarketData } from '../domain/index.js';
 import { AppStatus } from '../application/StockMonitorApp.js';
+import { SearchDialog } from './SearchDialog.js';
 
 /**
  * Interface for loading progress information
@@ -25,11 +26,11 @@ export class TerminalRenderer {
   private isInitialized = false;
   private scrollPosition = 0; // Track scroll position for preservation during refresh
   private resizeTimeout?: NodeJS.Timeout; // For debounced resize handling
-  private relativeScrollPosition = 0; // Relative scroll position (0-1) for resize preservation
   private selectedIndex: number = -1; // Currently selected row (-1 = none)
   private selectedSymbol: string | null = null; // Currently selected stock symbol
   private marketData: MarketData | null = null; // Cache for re-rendering
   private currentStatus: AppStatus | null = null; // Cache current status for re-rendering
+  private searchDialog!: SearchDialog; // Search dialog component (initialized in constructor)
 
   /**
    * Initialize the renderer
@@ -44,6 +45,9 @@ export class TerminalRenderer {
         enableMouseMovement: true // Enable hover tracking
       });
       this.isInitialized = true;
+      
+      // Initialize search dialog
+      this.searchDialog = new SearchDialog();
       
       // Set up resize event handling
       this.setupResizeHandling();
@@ -90,19 +94,6 @@ export class TerminalRenderer {
       this.restoreRelativeScrollPosition();
     }, 300); // 300ms debounce
   };
-
-  /**
-   * Calculate and store relative scroll position (0.0 to 1.0)
-   */
-  private calculateRelativeScrollPosition(totalStocks: number): void {
-    if (totalStocks <= 0) {
-      this.relativeScrollPosition = 0;
-      return;
-    }
-    
-    // Calculate relative position based on current scroll and total content
-    this.relativeScrollPosition = Math.min(1.0, Math.max(0.0, this.scrollPosition / totalStocks));
-  }
 
   /**
    * Preserve relative scroll position before resize
@@ -270,6 +261,23 @@ export class TerminalRenderer {
   public clearSelection(): void {
     this.selectedIndex = -1;
     this.selectedSymbol = null;
+  }
+
+  /**
+   * Create search button for the header
+   */
+  private createSearchButton() {
+    return Box(
+      {
+        width: 3,
+        height: 1,
+        onMouseDown: (event) => {
+          event.stopPropagation();
+          this.searchDialog.open(this.renderer);
+        }
+      },
+      Text({ content: '🔎', width: 3, fg: '#00FF00' })
+    );
   }
 
   /**
@@ -485,22 +493,32 @@ export class TerminalRenderer {
         padding: 1,
         flexDirection: 'column'
       },
-      Box(
-        {
-          width: '100%',
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          alignItems: 'center'
-        },
-        Text({
-          content: '📈 CAC40 Live Monitor',
-          fg: '#00FF00'
-        }),
-        Text({
-          content: this.getStatusIndicator(status),
-          fg: status.isConnected ? '#00FF00' : '#FF0000'
-        })
-      )
+        Box(
+          {
+            width: '100%',
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center'
+          },
+          // Left side: Title + Search button (small gap)
+          Box(
+            {
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 2
+            },
+            Text({
+              content: '📈 CAC40 Live Monitor',
+              fg: '#00FF00'
+            }),
+            this.createSearchButton()
+          ),
+          // Right side: Status indicator (far right)
+          Text({
+            content: this.getStatusIndicator(status),
+            fg: status.isConnected ? '#00FF00' : '#FF0000'
+          })
+        )
     );
   }
 
