@@ -2,6 +2,7 @@
 export { Price } from './Price.js';
 export { Stock } from './Stock.js';
 export { MarketData } from './MarketData.js';
+export type { SearchResult } from './SearchResult.js';
 
 // Domain types
 export interface StockData {

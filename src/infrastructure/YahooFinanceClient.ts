@@ -188,9 +188,16 @@ export class YahooFinanceClient {
   }
 
   /**
+   * Fetch data for a single stock by symbol (public for dynamic additions)
+   */
+  public async fetchSingleStock(symbol: string): Promise<StockData | null> {
+    return this.fetchSingleStockInternal(symbol);
+  }
+
+  /**
    * Fetch data for a single stock using Yahoo Finance v8 chart endpoint
    */
-  private async fetchSingleStock(symbol: string): Promise<StockData | null> {
+  private async fetchSingleStockInternal(symbol: string): Promise<StockData | null> {
     try {
       const url = `${this.baseUrl}/v8/finance/chart/${symbol}`;
       

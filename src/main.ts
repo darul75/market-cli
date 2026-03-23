@@ -24,6 +24,16 @@ async function main(): Promise<void> {
     console.log('🎨 Initializing terminal interface...');
     await renderer.initialize();
     
+    // Set up search service
+    const currentApp = app;
+    renderer.setupSearchService(
+      currentApp.getSearchService(),
+      async (symbol: string, name: string) => {
+        console.log(`\n✅ Adding ${symbol} (${name}) to watchlist...`);
+        await currentApp.addStock(symbol, name);
+      }
+    );
+    
     // Set up progress tracking
     const progressListener = (progress: ProgressUpdate) => {
       currentProgress = progress;

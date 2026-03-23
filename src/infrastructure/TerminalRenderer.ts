@@ -1,7 +1,14 @@
 import { createCliRenderer, Box, Text, CliRenderer, ScrollBox } from '@opentui/core';
 import { Stock, MarketData } from '../domain/index.js';
-import { AppStatus } from '../application/StockMonitorApp.js';
-import { SearchDialog } from './SearchDialog.js';
+import { AppStatus, SearchService } from '../application/index.js';
+import { SearchPanel } from './search/index.js';
+import * as fs from 'fs';
+
+function debugLog(msg: string): void {
+  try {
+    fs.appendFileSync('/tmp/marker-cli-debug.log', `[${new Date().toISOString()}] TerminalRenderer: ${msg}\n`);
+  } catch {}
+}
 
 /**
  * Interface for loading progress information
@@ -24,13 +31,14 @@ export interface LoadingProgress {
 export class TerminalRenderer {
   private renderer!: CliRenderer;
   private isInitialized = false;
-  private scrollPosition = 0; // Track scroll position for preservation during refresh
   private resizeTimeout?: NodeJS.Timeout; // For debounced resize handling
   private selectedIndex: number = -1; // Currently selected row (-1 = none)
   private selectedSymbol: string | null = null; // Currently selected stock symbol
   private marketData: MarketData | null = null; // Cache for re-rendering
   private currentStatus: AppStatus | null = null; // Cache current status for re-rendering
-  private searchDialog!: SearchDialog; // Search dialog component (initialized in constructor)
+  
+  // Search panel (new architecture)
+  private searchPanel: SearchPanel | null = null;
 
   /**
    * Initialize the renderer
@@ -45,9 +53,6 @@ export class TerminalRenderer {
         enableMouseMovement: true // Enable hover tracking
       });
       this.isInitialized = true;
-      
-      // Initialize search dialog
-      this.searchDialog = new SearchDialog();
       
       // Set up resize event handling
       this.setupResizeHandling();
@@ -112,18 +117,26 @@ export class TerminalRenderer {
   }
 
   /**
-   * Clear the screen before rendering new content
+   * Clear the screen by removing all children from the root
    */
   private clearScreen(): void {
     if (!this.isInitialized) return;
     
-    // Remove all existing children from the root
-    const children = this.renderer.root.getChildren();
-    children.forEach(child => {
-      if (child.id) {
-        this.renderer.root.remove(child.id);
+    try {
+      // Remove all existing children from the root
+      const children = this.renderer.root.getChildren();
+      for (const child of children) {
+        if (child && child.id) {
+          try {
+            this.renderer.root.remove(child.id);
+          } catch (e) {
+            // Ignore errors removing individual children
+          }
+        }
       }
-    });
+    } catch (e) {
+      // Ignore errors during clear
+    }
   }
 
   /**
@@ -264,20 +277,63 @@ export class TerminalRenderer {
   }
 
   /**
+   * Set up the search service with new architecture
+   */
+  public setupSearchService(searchService: SearchService, onAddStock: (symbol: string, name: string) => void): void {
+    debugLog('Setting up search service with new architecture');
+    
+    // Create the search panel with proper callbacks
+    this.searchPanel = new SearchPanel(
+      searchService,
+      onAddStock,
+      () => this.toggleSearch(), // Close callback
+      () => this.renderWithCurrentStatus()
+    );
+    
+    debugLog('Search panel created successfully');
+  }
+
+  /**
+   * Toggle search panel visibility (simplified)
+   */
+  private toggleSearch(): void {
+    
+    // Setup keyboard handler for search navigation
+    this.setupSearchKeyboardHandler();
+    
+    
+    // Only re-render to show/hide the search panel - content updates don't trigger this
+    this.renderWithCurrentStatus();
+  }
+
+  /**
    * Create search button for the header
    */
   private createSearchButton() {
+    const self = this;
     return Box(
       {
         width: 3,
         height: 1,
         onMouseDown: (event) => {
           event.stopPropagation();
-          this.searchDialog.open(this.renderer);
+          self.toggleSearch();
         }
       },
-      Text({ content: '🔎', width: 3, fg: '#00FF00' })
+      Text({ content: '🔎', width: 3, fg:  '#00FFFF' })
     );
+  }
+
+  /**
+   * Create search panel using new architecture
+   */
+  private createSearchPanel(): any {
+    if (!this.searchPanel) {
+      debugLog('ERROR: searchPanel is null when trying to render');
+      return null;
+    }
+    
+    return this.searchPanel.render();
   }
 
   /**
@@ -295,6 +351,25 @@ export class TerminalRenderer {
     // Clear previous content first
     this.clearScreen();
 
+    // Build children array
+    const children: any[] = [
+      // Header
+      this.createHeader(status)
+    ];
+    
+    // Add remaining children
+    children.push(
+      // Market summary
+      this.createMarketSummary(marketData),
+      // Stock table (with flexible ScrollBox inside)
+      this.createStockTable(marketData.stocks),
+
+      // Add search panel if visible
+      this.createSearchPanel(),
+      // Footer
+      this.createFooter(status)
+    );
+
     // Create and add main container to root
     this.renderer.root.add(
       Box(
@@ -304,14 +379,7 @@ export class TerminalRenderer {
           flexDirection: 'column',
           padding: 1
         },
-        // Header
-        this.createHeader(status),
-        // Market summary
-        this.createMarketSummary(marketData),
-        // Stock table (with flexible ScrollBox inside)
-        this.createStockTable(marketData.stocks),
-        // Footer
-        this.createFooter(status)
+        ...children
       )
     );
   }
@@ -767,6 +835,12 @@ export class TerminalRenderer {
       }
       if (process.removeListener) {
         process.removeListener('SIGWINCH', this.handleResize);
+      }
+      
+      // Cleanup search panel
+      if (this.searchPanel) {
+        this.searchPanel.destroy();
+        this.searchPanel = null;
       }
       
       console.log('🧹 Renderer cleaned up');

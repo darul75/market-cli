@@ -158,7 +158,9 @@ export class StockDataStream {
         this.retryCount = 0;
         this.initialLoadComplete = true;
         console.log('✅ Initial data load completed successfully');
-        return this.transformationService.transformToMarketData(response.data);
+        const marketData = this.transformationService.transformToMarketData(response.data);
+        console.log(`[STREAM] Transformed to MarketData with ${marketData.stocks.length} stocks`);
+        return marketData;
       }),
       tap(() => {
         this.loadingSubject.next(false);
@@ -221,7 +223,6 @@ export class StockDataStream {
     combinedStream$.subscribe({
       next: (marketData: MarketData) => {
         this.marketDataSubject.next(marketData);
-        console.log(`📈 Updated market data: ${marketData.stocks.length} stocks`);
       },
       error: (error: any) => {
         console.error('💥 Fatal data stream error:', error);
@@ -267,6 +268,28 @@ export class StockDataStream {
    */
   public getCurrentData(): MarketData | null {
     return this.marketDataSubject.value;
+  }
+
+  /**
+   * Add a new stock to the market data
+   */
+  public async addStock(symbol: string, name: string): Promise<void> {
+    const currentData = this.marketDataSubject.value;
+    if (!currentData) {
+      throw new Error('No market data available');
+    }
+
+    try {
+      const stockData = await this.apiClient.fetchSingleStock(symbol);
+      if (stockData) {
+        const stock = this.transformationService.transformToStock(stockData);
+        currentData.stocks.push(stock);
+        this.marketDataSubject.next(currentData);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Failed to add stock ${symbol}: ${errorMessage}`);
+    }
   }
 
   /**

@@ -1,5 +1,6 @@
 import { StockDataStream } from './StockDataStream.js';
 import { MarketData, Stock } from '../domain/index.js';
+import { SearchService } from './SearchService.js';
 import { Observable, map, startWith } from 'rxjs';
 
 /**
@@ -7,10 +8,21 @@ import { Observable, map, startWith } from 'rxjs';
  */
 export class StockMonitorApp {
   private readonly dataStream: StockDataStream;
+  private readonly searchService: SearchService;
   private isRunning: boolean = false;
 
   constructor() {
     this.dataStream = new StockDataStream();
+    this.searchService = new SearchService();
+  }
+
+  public getSearchService(): SearchService {
+    return this.searchService;
+  }
+
+  public async addStock(symbol: string, name: string): Promise<void> {
+    console.log(`Adding ${symbol} (${name}) to watchlist...`);
+    await this.dataStream.addStock(symbol, name);
   }
 
   /**

@@ -11,7 +11,7 @@ export class DataTransformationService {
   transformToStocks(stockDataArray: StockData[]): Stock[] {
     return stockDataArray
       .filter(this.isValidStockData)
-      .map(this.transformToStock);
+      .map((data) => this.transformToStock(data));
   }
 
   /**
@@ -35,7 +35,7 @@ export class DataTransformationService {
   /**
    * Transform single stock data to domain Stock object
    */
-  private transformToStock = (stockData: StockData): Stock => {
+  public transformToStock(stockData: StockData): Stock {
     const currentPrice = new Price(stockData.price, 'EUR');
     const previousPrice = new Price(stockData.previousClose, 'EUR');
     
