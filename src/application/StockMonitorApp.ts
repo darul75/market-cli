@@ -77,7 +77,7 @@ export class StockMonitorApp {
       map(status => ({
         ...status,
         isRunning: this.isRunning,
-        appTitle: 'CAC40 Live Monitor'
+        appTitle: 'Stock Live Monitor'
       }))
     );
 

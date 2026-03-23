@@ -1,4 +1,4 @@
-import { createCliRenderer, Box, Text, CliRenderer, ScrollBox } from '@opentui/core';
+import { createCliRenderer, Box, Text, CliRenderer, ScrollBox, Input, InputRenderableEvents } from '@opentui/core';
 import { Stock, MarketData } from '../domain/index.js';
 import { AppStatus, SearchService } from '../application/index.js';
 import { SearchPanel } from './search/index.js';
@@ -39,6 +39,12 @@ export class TerminalRenderer {
   
   // Search panel (new architecture)
   private searchPanel: SearchPanel | null = null;
+
+  // Portfolio tracking: share quantities per symbol
+  private stockQuantities: Map<string, number> = new Map();
+  private editingSymbol: string | null = null;
+  private editingInputValue: string = '';
+
 
   /**
    * Initialize the renderer
@@ -172,15 +178,17 @@ export class TerminalRenderer {
     symbol: string,
     color: string,
     handler: () => void,
-    isVisible: boolean = true
+    isVisible: boolean = true,
+    marginLeft: number = 0,
   ) {
     if (!isVisible) {
       // Invisible button (transparent, preserves layout)
       return Box(
         {
-          width: 1,
+          width: 2,
           height: 1,
-          backgroundColor: 'transparent'
+          backgroundColor: 'transparent',
+          marginLeft
         },
         Text({ content: ' ', width: 1 })
       );
@@ -189,14 +197,15 @@ export class TerminalRenderer {
     // Visible button: colored symbol with click handler
     return Box(
       {
-        width: 1,
+        width: 2,
         height: 1,
+        marginLeft,
         onMouseDown: (event) => {
           event.stopPropagation(); // Prevent row selection handler
           handler();
         }
       },
-      Text({ content: symbol, width: 1, fg: color })
+      Text({ content: symbol, width: 2, fg: color })
     );
   }
 
@@ -286,42 +295,11 @@ export class TerminalRenderer {
     this.searchPanel = new SearchPanel(
       searchService,
       onAddStock,
-      () => this.toggleSearch(), // Close callback
+      () => {}, // Close callback
       () => this.renderWithCurrentStatus()
     );
     
     debugLog('Search panel created successfully');
-  }
-
-  /**
-   * Toggle search panel visibility (simplified)
-   */
-  private toggleSearch(): void {
-    
-    // Setup keyboard handler for search navigation
-    this.setupSearchKeyboardHandler();
-    
-    
-    // Only re-render to show/hide the search panel - content updates don't trigger this
-    this.renderWithCurrentStatus();
-  }
-
-  /**
-   * Create search button for the header
-   */
-  private createSearchButton() {
-    const self = this;
-    return Box(
-      {
-        width: 3,
-        height: 1,
-        onMouseDown: (event) => {
-          event.stopPropagation();
-          self.toggleSearch();
-        }
-      },
-      Text({ content: '🔎', width: 3, fg:  '#00FFFF' })
-    );
   }
 
   /**
@@ -351,37 +329,48 @@ export class TerminalRenderer {
     // Clear previous content first
     this.clearScreen();
 
-    // Build children array
-    const children: any[] = [
-      // Header
-      this.createHeader(status)
-    ];
-    
-    // Add remaining children
-    children.push(
-      // Market summary
+    // Normal content column
+    const content = Box(
+      {
+        width: '100%',
+        flexDirection: 'column',
+        flexGrow: 1
+      },
+      this.createHeader(status),
       this.createMarketSummary(marketData),
-      // Stock table (with flexible ScrollBox inside)
       this.createStockTable(marketData.stocks),
-
-      // Add search panel if visible
       this.createSearchPanel(),
-      // Footer
+      this.createPortfolioSummary(),
       this.createFooter(status)
     );
 
-    // Create and add main container to root
     this.renderer.root.add(
       Box(
-        {
-          width: '100%',
-          height: '100%', // Use full terminal height
-          flexDirection: 'column',
-          padding: 1
-        },
-        ...children
+        { width: '100%', height: '100%', flexDirection: 'column', padding: 1 },
+        content
       )
     );
+
+    if (this.editingSymbol) {
+      // True overlay: absolutely positioned full-screen wrapper centers the dialog
+      this.renderer.root.add(
+        Box(
+          {
+            id: 'qty-dialog-overlay',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            flexDirection: 'row',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 100
+          },
+          this.createQtyDialog()
+        )
+      );
+    }
   }
 
   /**
@@ -398,7 +387,7 @@ export class TerminalRenderer {
     // Main loading message
     elements.push(
       Text({
-        content: '🔄 Loading CAC40 Data...',
+        content: '🔄 Loading data...',
         fg: '#00FF00'
       })
     );
@@ -558,7 +547,8 @@ export class TerminalRenderer {
         height: 3,
         borderStyle: 'single',
         borderColor: '#00FF00',
-        padding: 1,
+        paddingLeft: 1,
+        paddingRight: 1,
         flexDirection: 'column'
       },
         Box(
@@ -573,13 +563,13 @@ export class TerminalRenderer {
             {
               flexDirection: 'row',
               alignItems: 'center',
-              gap: 2
+              gap: 2,
+              height:1
             },
             Text({
-              content: '📈 CAC40 Live Monitor',
+              content: '📈 Stock Live Monitor',
               fg: '#00FF00'
             }),
-            this.createSearchButton()
           ),
           // Right side: Status indicator (far right)
           Text({
@@ -599,7 +589,9 @@ export class TerminalRenderer {
     return Box(
       {
         width: '100%',
-        height: 2,
+        height: 1,
+        paddingLeft: 1,
+        paddingRight: 1,
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center'
@@ -685,7 +677,9 @@ export class TerminalRenderer {
       Text({ content: 'Price', width: 10, fg: '#FFFFFF' }),
       Text({ content: 'Change', width: 8, fg: '#FFFFFF' }),
       Text({ content: '%Change', width: 8, fg: '#FFFFFF' }),
-      Text({ content: 'Volume', width: 10, fg: '#FFFFFF' })
+      Text({ content: 'Volume', width: 10, fg: '#FFFFFF' }),
+      Text({ content: 'Qty', width: 8, fg: '#FFFFFF' }),
+      Text({ content: 'Actions', width: 15, fg: '#AAAAFF' })
     );
   }
 
@@ -709,35 +703,19 @@ export class TerminalRenderer {
     
     // Brighter symbol color when selected
     const symbolColor = isSelected ? '#00FFFF' : '#00BFFF';
+    const qty = this.stockQuantities.get(stock.symbol);
     
     // Create action buttons (only visible when selected)
-    const moveUpButton = this.createActionButton(
-      '▲',
-      '#00FF00',
-      () => this.handleMoveUp(index - 1), // Convert to 0-based index
-      isSelected
-    );
-    
-    const moveDownButton = this.createActionButton(
-      '▼',
-      '#FFFF00',
-      () => this.handleMoveDown(index - 1),
-      isSelected
-    );
-    
-    const deleteButton = this.createActionButton(
-      '✕',
-      '#FF0000',
-      () => this.handleDelete(index - 1),
-      isSelected
-    );
+    const moveUpButton = this.createActionButton('🔼', '#00FF00', () => this.handleMoveUp(index - 1), isSelected, !qty || qty === 0 ? 4: 2);
+    const moveDownButton = this.createActionButton('🔽', '#FFFF00', () => this.handleMoveDown(index - 1), isSelected);
+    const deleteButton = this.createActionButton('❌', '#FF0000', () => this.handleDelete(index - 1), isSelected);
     
     // Spacer between buttons
     const buttonSpacer = Box(
       {
         width: 1,
         height: 1,
-        backgroundColor: 'transparent'
+        backgroundColor: 'transparent',
       },
       Text({ content: ' ', width: 1 })
     );
@@ -746,14 +724,17 @@ export class TerminalRenderer {
       {
         id: `stock-row-${stock.symbol}-${index}`,
         width: '100%',
+        paddingLeft: 1,
+        paddingRight: 1,
         height: 1,
         flexDirection: 'row',
-        padding: 1,
+        alignItems: 'center',
         backgroundColor,
         focusable: true,
         onMouseDown: (event) => {
-          if (event.button === 0) { // Left click only
-            this.handleRowClick(stock, index - 1); // Convert to 0-based index
+          if (this.editingSymbol !== null) return; // dialog is open, ignore row clicks
+          if (event.button === 0) {
+            this.handleRowClick(stock, index - 1);
           }
         }
       },
@@ -763,12 +744,160 @@ export class TerminalRenderer {
       Text({ content: stock.price.toString(), width: 10, fg: '#FFFFFF' }),
       Text({ content: stock.formattedPriceChange, width: 8, fg: changeColor }),
       Text({ content: stock.formattedPercentageChange, width: 8, fg: changeColor }),
-      Text({ content: stock.formattedVolume, width: 10, fg: '#CCCCCC' }),
+      Text({ content: stock.formattedVolume, width: 6, fg: '#CCCCCC' }),
+      this.createQtySection(stock.symbol, isSelected),
+      buttonSpacer,
       moveUpButton,
       buttonSpacer,
       moveDownButton,
       buttonSpacer,
       deleteButton
+    );
+  }
+
+  /**
+   * Qty display + edit button for a stock row (display-only; editing via dialog).
+   */
+  private createQtySection(symbol: string, isSelected: boolean): any {
+    const qty = this.stockQuantities.get(symbol);
+    const qtyText = qty !== undefined ? `x${qty}`.padStart(6) : '      ';
+
+    const editBtn = this.createActionButton('✏️', '#AAAAFF', () => {
+        this.editingSymbol = symbol;
+        this.editingInputValue = qty !== undefined ? qty.toString() : '';
+        this.renderWithCurrentStatus();
+      },
+      isSelected
+    );
+
+    if (qty && qty > 0) {
+      
+    }
+
+    return Box(
+      { width: 8, height: 1, flexDirection: 'row', alignItems:'center', marginLeft: qty && qty > 0 ? 2 : 0 },
+      Text({ content: qtyText, width: 6, fg: '#AAAAFF' }),
+      editBtn,
+      Box({ width: 1, height: 1 }, Text({ content: ' ', width: 1 }))
+    );
+  }
+
+  private createQtyDialog(): any {
+    if (!this.editingSymbol) return null;
+
+    const symbol = this.editingSymbol;
+    const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
+    const currentQty = this.stockQuantities.get(symbol);
+    const initialValue = currentQty !== undefined ? currentQty.toString() : '';
+
+    const input = Input({ width: 12, maxLength: 8, placeholder: '0', value: initialValue });
+
+    input.on(InputRenderableEvents.INPUT, (value: string) => {
+      this.editingInputValue = value;
+    });
+
+    setTimeout(() => {
+      input.focus();
+      if (initialValue) input.gotoLineEnd();
+    }, 0);
+
+    const confirmAndClose = () => {
+      const qty = parseInt(this.editingInputValue, 10);
+      if (!Number.isNaN(qty) && qty >= 0) {
+        if (qty === 0) {
+          this.stockQuantities.delete(symbol);
+        } else {
+          this.stockQuantities.set(symbol, qty);
+        }
+      }
+      this.editingSymbol = null;
+      this.editingInputValue = '';
+      this.renderWithCurrentStatus();
+    };
+
+    input.on(InputRenderableEvents.ENTER, confirmAndClose);
+
+    const priceStr = stock ? `  ${stock.price.toString()}` : '';
+
+    const okBtn = Box(
+      {
+        width: 8, height: 1, backgroundColor: '#004400',
+        onMouseDown: (e: any) => { e.stopPropagation(); confirmAndClose(); }
+      },
+      Text({ content: '  [OK]  ', width: 8, fg: '#00FF00' })
+    );
+
+    const cancelBtn = Box(
+      {
+        width: 10, height: 1, backgroundColor: '#440000',
+        onMouseDown: (e: any) => {
+          e.stopPropagation();
+          this.editingSymbol = null;
+          this.editingInputValue = '';
+          this.renderWithCurrentStatus();
+        }
+      },
+      Text({ content: ' [Cancel] ', width: 10, fg: '#FF4444' })
+    );
+
+    return Box(
+      {
+        id: 'qty-dialog',
+        width: 52,
+        flexDirection: 'column',
+        borderStyle: 'double',
+        borderColor: '#AAAAFF',
+        backgroundColor: '#08081a',
+        padding: 1,
+        zIndex: 100
+      },
+      Text({ content: `Set quantity — ${symbol}${priceStr}`, fg: '#AAAAFF' }),
+      Box(
+        { width: '100%', flexDirection: 'row', alignItems: 'center', marginTop: 1, gap: 1 },
+        Text({ content: 'Shares: ', width: 8, fg: '#888888' }),
+        input,
+        okBtn,
+        cancelBtn
+      )
+    );
+  }
+
+  /**
+   * Portfolio value summary bar — shown only when any quantities are set.
+   */
+  private createPortfolioSummary(): any {
+    if (this.stockQuantities.size === 0 || !this.marketData) return null;
+
+    let total = 0;
+    let currency = 'EUR';
+    let positionsCount = 0;
+
+    for (const stock of this.marketData.stocks) {
+      const qty = this.stockQuantities.get(stock.symbol);
+      if (qty !== undefined && qty > 0) {
+        total += qty * stock.price.amount;
+        currency = stock.price.currency;
+        positionsCount++;
+      }
+    }
+
+    if (positionsCount === 0) return null;
+
+    const currencySymbol = currency === 'EUR' ? '€' : currency;
+    const totalStr = `${currencySymbol}${total.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    return Box(
+      {
+        width: '100%',
+        height: 1,
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        padding: 1,
+        backgroundColor: '#111122'
+      },
+      Text({ content: `Portfolio (${positionsCount} position${positionsCount > 1 ? 's' : ''}):  `, fg: '#888888' }),
+      Text({ content: totalStr, fg: '#00FF88' })
     );
   }
 

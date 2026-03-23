@@ -195,8 +195,9 @@ export class SearchPanel {
       borderStyle: 'single',
       borderColor: '#666666',
       backgroundColor: '#000000',
-      padding: 1,
-      marginTop: 2
+      paddingLeft: 1,
+      paddingRight: 1
+
     },
       // Title bar
       Box({

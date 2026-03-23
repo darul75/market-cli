@@ -8,7 +8,7 @@ export class MarketData {
     public readonly stocks: Stock[],
     public readonly lastUpdate: Date,
     public readonly isLive: boolean = true,
-    public readonly indexName: string = 'CAC40'
+    public readonly indexName: string = ''
   ) {
     if (stocks.length === 0) {
       throw new Error('MarketData must contain at least one stock');

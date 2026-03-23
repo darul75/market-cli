@@ -78,7 +78,7 @@ private createScrollableResults(): any {
   /**
    * Create the default "No results yet" row
    */
-  private createDefaultRow(): any {
+  private   createDefaultRow(): any {
     debugLog('Creating default "No results yet" row');
 
     return Box({
@@ -136,7 +136,8 @@ private createScrollableResults(): any {
         height: 1,
         flexDirection: 'row',
         backgroundColor: bgColor,
-        padding: 1,
+        paddingLeft: 1,
+        paddingRight: 1,
         onMouseDown: this.config.enableMouseClicks ? 
           () => this.selectAndAddResult(index) : undefined
       },
