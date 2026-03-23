@@ -1,15 +1,17 @@
-# CAC40 Live Monitor
+# Stock Live Monitor
 
-A modern CLI application for monitoring live CAC40 stock prices in real-time, built with OpenTUI, RxJS, and TypeScript using Domain-Driven Design principles.
+A modern CLI application for monitoring live stock prices in real-time, built with OpenTUI, RxJS, and TypeScript using Domain-Driven Design principles.
 
 ## Features
 
-🚀 **Real-time Updates** - Stock prices update every 3 seconds  
-📊 **Rich Terminal UI** - Beautiful interface powered by OpenTUI  
-⚡ **Reactive Architecture** - Built with RxJS for smooth data streams  
-🏗️ **Clean Architecture** - Lightweight Domain-Driven Design  
-🔄 **Error Recovery** - Graceful fallback to sample data when API is unavailable  
-💰 **Financial Data** - Live price changes, volume, and market sentiment  
+:rocket: **Real-time Updates** - Stock prices update every 60 seconds  
+:mag: **Stock Search** - Search and add any stock from Yahoo Finance  
+:chart_with_upwards_trend: **Portfolio Tracking** - Track quantities and total portfolio value  
+:point_down_1: **Interactive Table** - Select rows, move stocks up/down, delete stocks  
+:zap: **Smart Batching** - Efficient API calls with progress tracking  
+:art: **Rich Terminal UI** - Beautiful interface powered by OpenTUI  
+:electric_plug: **Reactive Architecture** - Built with RxJS for smooth data streams  
+:building_construction: **Clean Architecture** - Lightweight Domain-Driven Design  
 
 ## Technology Stack
 
@@ -17,25 +19,32 @@ A modern CLI application for monitoring live CAC40 stock prices in real-time, bu
 - **[OpenTUI](https://opentui.com)** - Native terminal UI framework with Zig core
 - **[RxJS](https://rxjs.dev)** - Reactive programming for data streams
 - **[TypeScript](https://typescriptlang.org)** - Type safety and developer experience
-- **Yahoo Finance API** - Alternative data source for CAC40 stocks
+- **Yahoo Finance API** - Real-time stock data via v8 chart endpoint
 
 ## Architecture
-
-The application follows Domain-Driven Design principles with clear separation of concerns:
 
 ```
 src/
 ├── domain/                 # Core business logic
 │   ├── Stock.ts           # Stock entity with business methods
 │   ├── Price.ts           # Price value object with currency handling
-│   └── MarketData.ts      # Market data aggregate with analysis
+│   ├── MarketData.ts      # Market data aggregate with analysis
+│   └── SearchResult.ts    # Search result entity
 ├── infrastructure/        # External adapters
-│   ├── YahooFinanceClient.ts      # API client for stock data
+│   ├── YahooFinanceClient.ts      # API client for stock data (v8 endpoint)
+│   ├── SymbolSearchClient.ts      # Search API client for finding stocks
 │   ├── DataTransformationService.ts # Domain object transformation
-│   └── TerminalRenderer.ts        # OpenTUI interface components
+│   ├── TerminalRenderer.ts        # OpenTUI interface components
+│   └── search/                   # Search panel components
+│       ├── SearchPanel.ts
+│       ├── SearchInput.ts
+│       └── SearchResultsTable.ts
 ├── application/           # Use cases and coordination
 │   ├── StockDataStream.ts         # RxJS reactive data streams
-│   └── StockMonitorApp.ts         # Main application service
+│   ├── StockMonitorApp.ts        # Main application service
+│   └── SearchService.ts          # Stock search service
+├── shared/                # Shared utilities
+│   └── ProgressTracker.ts        # Loading progress tracking
 └── main.ts               # Application entry point
 ```
 
@@ -78,86 +87,117 @@ bun run start
 # Type checking
 bun run type-check
 
-# Test domain models
-bun run test.ts
+# Run tests
+bun run test
 ```
 
 ### Interface Overview
 
 ```
-┌─────────────────────────── CAC40 Live Monitor ──────────────────────────────┐
-│ 📈 CAC40 Live Monitor                                    🟢 LIVE            │
-└──────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────── Stock Live Monitor ───────────────────────────────┐
+│ 📈 Stock Live Monitor                                    🟢 LIVE             │
+└───────────────────────────────────────────────────────────────────────────────┘
 
-Stocks: 10    ↑ 6    ↓ 4                           Sentiment: BULLISH
+Stocks: 5    ↑ 3    ↓ 2                           Sentiment: BULLISH
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ #  │ Symbol     │ Name               │ Price    │ Change │ %Change │ Volume  │
-├────┼────────────┼────────────────────┼──────────┼────────┼─────────┼─────────┤
-│ 1  │ LVMH.PA    │ LVMH              │ €692.50  │ +5.80  │ +0.84%  │ 2.1M    │
-│ 2  │ ASML.AS    │ ASML Holding      │ €715.20  │ +12.45 │ +1.77%  │ 1.2M    │
-│ 3  │ SAP.PA     │ SAP               │ €189.34  │ -2.11  │ -1.10%  │ 890K    │
+│ #  │ Symbol      │ Name               │ Price    │ Change │ %Change │ Volume  │
+├────┼─────────────┼────────────────────┼──────────┼────────┼─────────┼─────────┤
+│ 1  │ AI.PA       │ Air Liquide        │ €165.40  │ +2.30  │ +1.41%  │ 1.2M    │
+│ 2  │ ALO.PA      │ Alstom             │ €24.15   │ -0.45  │ -1.83%  │ 890K    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌─ 🔍 Search Stocks ───────────────────────────────────────────────────────────┐
+│ > LVMH____________                                                      [X] │
+│   LVMH.PA  | LVMH Moet Hennessy Louis Vuitton | Paris (3 matches)            │
+│   LVMH     | LVMH                           | Currency in USD              │
 └──────────────────────────────────────────────────────────────────────────────┘
 
 Last: 14:30:05                                      Press Ctrl+C to exit
 ```
 
+### How to Use
+
+1. **View stocks** - The main table shows all tracked stocks with live prices
+2. **Select a stock** - Click on any row to select it (shows action buttons)
+3. **Move stocks** - Use :arrow_up:/:arrow_down: buttons to reorder stocks
+4. **Delete stocks** - Use the :x: button to remove a stock from the list
+5. **Track quantities** - Select a row and click the pencil icon to set share quantity
+6. **Add stocks** - Type in the search panel to find and add new stocks
+7. **Portfolio value** - Total portfolio value appears when quantities are set
+
 ## Features in Detail
 
-### Market Data
+### Stock Search
 
-- **Real-time Prices** - Live updates from Yahoo Finance API
-- **Price Changes** - Absolute and percentage changes with color coding
-- **Volume Information** - Trading volume with human-readable formatting
-- **Market Sentiment** - Overall market direction (Bullish/Bearish/Neutral)
+- **Real-time search** - Search any stock symbol via Yahoo Finance
+- **Debounced queries** - 300ms debounce to avoid excessive API calls
+- **Result display** - Shows symbol, name, and exchange for each match
+- **Quick add** - Click on a result to add it to your watchlist
 
-### Error Handling
+### Portfolio Tracking
 
-- **API Failures** - Graceful fallback to sample data
-- **Network Issues** - Automatic retry logic with exponential backoff
-- **Rate Limiting** - Respects API limits with appropriate intervals
-- **Connection Status** - Visual indicators for live/offline status
+- **Quantity management** - Set share quantities for each stock
+- **Real-time valuation** - Total portfolio value calculated from current prices
+- **Persistent display** - Portfolio summary shows at the bottom when quantities are set
+- **Edit dialog** - Modal dialog for entering/editing quantities
+
+### Interactive Table
+
+- **Row selection** - Click to select, click again to deselect
+- **Zebra striping** - Visual distinction between rows
+- **Action buttons** - Move up, move down, delete (visible when row selected)
+- **Scrollable** - Handle large lists with viewport culling
+
+### Data Loading
+
+- **Smart batching** - Fetches 8 stocks per batch for reliability
+- **Progress tracking** - Shows batch progress, success/error counts
+- **Rate limiting** - 0.8s delay between requests, 2s between batches
+- **Error handling** - Continues with successful stocks even if some fail
 
 ### User Experience
 
-- **Color-coded Data** - Green for gains, red for losses
-- **Real-time Updates** - Smooth updates without flickering
-- **Responsive Layout** - Adapts to terminal size
-- **Keyboard Support** - Clean exit with Ctrl+C
+- **Color-coded data** - Green for gains, red for losses
+- **Mouse support** - Full mouse interaction for clicks and selection
+- **Responsive layout** - Flexbox layout adapts to terminal size
+- **Clean exit** - Graceful shutdown with Ctrl+C
 
 ## Data Sources
 
 ### Yahoo Finance API
 
-The application uses Yahoo Finance's public API as the primary data source:
+The application uses Yahoo Finance's v8 chart endpoint as the primary data source:
 
-- **Endpoint:** `https://query1.finance.yahoo.com/v7/finance/quote`
-- **CAC40 Symbols:** Major French stocks with `.PA` suffix (e.g., `LVMH.PA`, `SAP.PA`)
-- **Update Frequency:** Every 3 seconds (configurable)
-- **Rate Limits:** ~2000 requests/hour (handled gracefully)
+- **Stock Data Endpoint:** `https://query1.finance.yahoo.com/v8/finance/chart/{symbol}`
+- **Search Endpoint:** `https://query2.finance.yahoo.com/v1/finance/search`
+- **CAC40 Symbols:** French stocks with `.PA` suffix (e.g., `LVMH.PA`, `AI.PA`)
+- **Update Frequency:** Every 60 seconds
+- **Initial Load:** Smart batching with progress tracking
 
-### Sample Data
+### Default Tracked Stocks
 
-When the API is unavailable, the application falls back to realistic sample data including:
+The application starts with these CAC40 stocks:
 
-- LVMH, ASML, SAP, TotalEnergies, Sanofi
-- Realistic price movements and volumes
-- Proper market sentiment calculations
+- Air Liquide (AI.PA)
+- Alstom (ALO.PA)
+- ArcelorMittal (MT.AS)
+- BNP Paribas (BNP.PA)
 
 ## Domain Model
 
 ### Core Entities
 
-- **Stock** - Represents individual stocks with price calculations
+- **Stock** - Represents individual stocks with price calculations and formatting
 - **Price** - Value object with currency and formatting logic
 - **MarketData** - Aggregate containing multiple stocks with market analysis
+- **SearchResult** - Search result entity with symbol, name, and exchange info
 
 ### Business Logic
 
 - Price change calculations (absolute and percentage)
 - Volume formatting (K, M, B notation)
 - Market sentiment analysis (Bullish/Bearish/Neutral)
-- Risk indicators based on volatility
 - Data freshness validation
 
 ## Development
@@ -167,17 +207,20 @@ When the API is unavailable, the application falls back to realistic sample data
 1. **Lightweight DDD** - Clean domain modeling without over-engineering
 2. **Reactive Streams** - RxJS for elegant async data handling
 3. **Type Safety** - Full TypeScript coverage for reliability
-4. **Error Recovery** - Resilient design with fallback mechanisms
-5. **Performance** - Native OpenTUI rendering for smooth updates
+4. **Progress Tracking** - Real-time feedback during batch loading
+5. **Performance** - Native OpenTUI rendering with viewport culling
 
 ### Testing
 
 ```bash
-# Test domain models
-bun run test.ts
+# Run tests
+bun run test
 
-# Manual testing with sample data
-bun run dev  # Will show sample data if API fails
+# Type checking
+bun run type-check
+
+# Manual testing
+bun run dev
 ```
 
 ### Extending
@@ -187,14 +230,7 @@ The modular architecture makes it easy to:
 - Add new stock exchanges or indices
 - Integrate different data providers
 - Implement additional UI components
-- Add features like watchlists or alerts
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Submit a pull request
+- Add features like alerts or historical charts
 
 ## License
 
