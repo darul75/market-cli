@@ -966,6 +966,9 @@ export class TerminalRenderer {
       buttonSpacer,
       detailsBtn,
       buttonSpacer,
+      moveUpButton,
+      buttonSpacer,
+      moveDownButton,
       deleteBtn
     );
   }
