@@ -1,12 +1,16 @@
 # Stock Live Monitor
 
-A modern CLI application for monitoring live stock prices in real-time, built with OpenTUI, RxJS, and TypeScript using Domain-Driven Design principles.
+A modern CLI application for monitoring live stock prices in real-time with portfolio tracking, built with OpenTUI, RxJS, and TypeScript using Domain-Driven Design principles.
 
 ## Features
 
 :rocket: **Real-time Updates** - Stock prices update every 60 seconds  
 :mag: **Stock Search** - Search and add any stock from Yahoo Finance  
-:chart_with_upwards_trend: **Portfolio Tracking** - Track quantities and total portfolio value  
+:chart_with_upwards_trend: **Portfolio Tracking** - Track quantities, invested amounts, and total portfolio value  
+:currency_exchange: **BUY/SELL Transactions** - Record buy and sell transactions with historical prices  
+:chart: **Realized & Unrealized P&L** - Track profits/losses from trades and current positions  
+:receipt: **Transaction History** - View all transactions for any stock with date picker  
+:floppy_disk: **Persistent Portfolio** - Portfolio saved to JSON file, survives restarts  
 :point_down_1: **Interactive Table** - Select rows, move stocks up/down, delete stocks  
 :zap: **Smart Batching** - Efficient API calls with progress tracking  
 :art: **Rich Terminal UI** - Beautiful interface powered by OpenTUI  
@@ -26,13 +30,17 @@ A modern CLI application for monitoring live stock prices in real-time, built wi
 ```
 src/
 ├── domain/                 # Core business logic
-│   ├── Stock.ts           # Stock entity with business methods
-│   ├── Price.ts           # Price value object with currency handling
-│   ├── MarketData.ts      # Market data aggregate with analysis
-│   └── SearchResult.ts    # Search result entity
-├── infrastructure/        # External adapters
+│   ├── Stock.ts            # Stock entity with business methods
+│   ├── Price.ts            # Price value object with currency handling
+│   ├── MarketData.ts       # Market data aggregate with analysis
+│   ├── Position.ts         # Position entity with transactions
+│   ├── PositionCalculator.ts # FIFO P&L calculations
+│   └── SearchResult.ts     # Search result entity
+├── infrastructure/         # External adapters
 │   ├── YahooFinanceClient.ts      # API client for stock data (v8 endpoint)
 │   ├── SymbolSearchClient.ts      # Search API client for finding stocks
+│   ├── HistoricalPriceService.ts   # Historical price fetching for transactions
+│   ├── PortfolioStore.ts          # JSON persistence for portfolio
 │   ├── DataTransformationService.ts # Domain object transformation
 │   ├── TerminalRenderer.ts        # OpenTUI interface components
 │   └── search/                   # Search panel components
@@ -53,7 +61,7 @@ src/
 ### Prerequisites
 
 - [Bun](https://bun.sh) v1.0 or later
-- Modern terminal (WezTerm, Alacritty, etc. recommended)
+- Modern terminal (WezTerm, Alacritty, iTerm2, etc. recommended)
 
 ### Setup
 
@@ -62,12 +70,19 @@ src/
    bun install
    ```
 
-2. **Run the application:**
+2. **Build the application:**
    ```bash
-   bun run dev
+   bun run build
    ```
 
-3. **Exit the application:**
+3. **Run the application:**
+   ```bash
+   bun run src/main.ts
+   # or for production
+   bun run dist/main.js
+   ```
+
+4. **Exit the application:**
    Press `Ctrl+C` to exit gracefully
 
 ## Usage
@@ -75,79 +90,141 @@ src/
 ### Development Commands
 
 ```bash
-# Start the application in development mode
-bun run dev
+# Install dependencies
+bun install
 
 # Build for production
 bun run build
+
+# Run from source
+bun run src/main.ts
 
 # Run production build
 bun run start
 
 # Type checking
 bun run type-check
-
-# Run tests
-bun run test
 ```
 
 ### Interface Overview
 
 ```
-┌─────────────────────────── Stock Live Monitor ───────────────────────────────┐
-│ 📈 Stock Live Monitor                                    🟢 LIVE             │
-└───────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 📈 Stock Live Monitor                                            🟢 LIVE      │
+└──────────────────────────────────────────────────────────────────────────────┘
 
-Stocks: 5    ↑ 3    ↓ 2                           Sentiment: BULLISH
+Stocks: 1    ↑ 1    ↓ 0                               Sentiment: BULLISH
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ #  │ Symbol      │ Name               │ Price    │ Change │ %Change │ Volume  │
-├────┼─────────────┼────────────────────┼──────────┼────────┼─────────┼─────────┤
-│ 1  │ AI.PA       │ Air Liquide        │ €165.40  │ +2.30  │ +1.41%  │ 1.2M    │
-│ 2  │ ALO.PA      │ Alstom             │ €24.15   │ -0.45  │ -1.83%  │ 890K    │
+│ #  Symbol   Price     Change  Qty  Invested    Value      Unreal.   Real.   │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ 1  AAPL     251.49    +3.50   10   €2,000     €2,515     +€515     -      │
 └──────────────────────────────────────────────────────────────────────────────┘
 
-┌─ 🔍 Search Stocks ───────────────────────────────────────────────────────────┐
-│ > LVMH____________                                                      [X] │
-│   LVMH.PA  | LVMH Moet Hennessy Louis Vuitton | Paris (3 matches)            │
-│   LVMH     | LVMH                           | Currency in USD              │
-└──────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────┐  ┌────────────────────────┐
+│ 🔍 Search Stocks            │  │ 💼 Portfolio           │
+│ > AAPL_                     │  │     €2,515            │
+│ ┌─────────────────────────┐ │  │   +€515 (+25.7%)      │
+│ │ AAPL  Apple Inc.        │ │  └────────────────────────┘
+│ └─────────────────────────┘ │
+└─────────────────────────────┘
 
-Last: 14:30:05                                      Press Ctrl+C to exit
+Last: 9:58:05 AM                                      Press Ctrl+C to exit
 ```
 
 ### How to Use
 
 1. **View stocks** - The main table shows all tracked stocks with live prices
 2. **Select a stock** - Click on any row to select it (shows action buttons)
-3. **Move stocks** - Use :arrow_up:/:arrow_down: buttons to reorder stocks
-4. **Delete stocks** - Use the :x: button to remove a stock from the list
-5. **Track quantities** - Select a row and click the pencil icon to set share quantity
-6. **Add stocks** - Type in the search panel to find and add new stocks
-7. **Portfolio value** - Total portfolio value appears when quantities are set
+3. **Add stocks** - Type in the search panel to find and add new stocks (saved to portfolio)
+4. **Buy stocks** - Click 📈 button to record a BUY transaction
+5. **Sell stocks** - Click 📉 button to record a SELL transaction
+6. **View history** - Click 📋 button to see all transactions for a stock
+7. **Move stocks** - Use 🔼/🔽 buttons to reorder stocks (order persisted)
+8. **Delete stocks** - Click ❌ button to remove a stock from the portfolio
+
+### Stock Table Columns
+
+| Column | Description |
+|--------|-------------|
+| `#` | Row number |
+| `Symbol` | Stock ticker symbol |
+| `Price` | Current market price |
+| `Change` | Price change today |
+| `Qty` | Current share quantity held |
+| `Invested` | Total amount invested (from BUY transactions) |
+| `Value` | Current market value (Qty × Price) |
+| `Unreal.` | Unrealized P&L (current value - invested) |
+| `Real.` | Realized P&L (from completed SELL transactions) |
+| `Actions` | Action buttons (buy, sell, history, move, delete) |
+
+### Action Buttons
+
+| Button | Action | Description |
+|--------|--------|-------------|
+| 📈 | Buy | Record a BUY transaction |
+| 📉 | Sell | Record a SELL transaction |
+| 📋 | History | View transaction history |
+| 🔼 | Move Up | Move stock up in the list |
+| 🔽 | Move Down | Move stock down in the list |
+| ❌ | Delete | Remove stock from portfolio |
 
 ## Features in Detail
+
+### Portfolio Persistence
+
+- Portfolio is saved to `data/portfolio.json`
+- Automatically loaded on startup
+- Changes are saved immediately (add stock, buy, sell)
+- Supports empty portfolio - app shows main UI with "No stocks" message
+
+### BUY/SELL Transactions
+
+- **BUY transactions** - Record purchases with date, quantity, and price
+- **SELL transactions** - Record sales with FIFO cost basis calculation
+- **Date picker** - Select transaction date from calendar
+- **Historical prices** - Fetch price from Yahoo Finance for transaction date
+- **FIFO accounting** - First-In-First-Out for realized P&L calculation
+
+### Transaction History Panel
+
+Press 📋 on any stock to view all transactions:
+```
+┌─ Transaction History: AAPL ────────────────────────────────────────┐
+│                                                                     │
+│  BUY  2026-03-01   10 shares @ €200.00  = €2,000.00              │
+│  SELL 2026-03-15    5 shares @ €220.00  = €1,100.00              │
+│                                                                     │
+│  Remaining: 5 shares | Avg Cost: €200.00                          │
+│  Realized P&L: +€100.00                                           │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### P&L Calculations
+
+- **Unrealized P&L** - Shows gain/loss on current holdings
+  - Formula: (Current Price × Qty) - Total Invested
+  - Updates in real-time with price changes
+
+- **Realized P&L** - Shows profit/loss from completed trades
+  - Uses FIFO (First-In-First-Out) method
+  - Calculated when shares are sold
+  - Includes partial sells (selling some but not all shares)
 
 ### Stock Search
 
 - **Real-time search** - Search any stock symbol via Yahoo Finance
-- **Debounced queries** - 300ms debounce to avoid excessive API calls
+- **Debounced queries** - 1 second debounce to avoid excessive API calls
 - **Result display** - Shows symbol, name, and exchange for each match
-- **Quick add** - Click on a result to add it to your watchlist
-
-### Portfolio Tracking
-
-- **Quantity management** - Set share quantities for each stock
-- **Real-time valuation** - Total portfolio value calculated from current prices
-- **Persistent display** - Portfolio summary shows at the bottom when quantities are set
-- **Edit dialog** - Modal dialog for entering/editing quantities
+- **Quick add** - Click on a result to add it to your portfolio
 
 ### Interactive Table
 
 - **Row selection** - Click to select, click again to deselect
 - **Zebra striping** - Visual distinction between rows
-- **Action buttons** - Move up, move down, delete (visible when row selected)
+- **Action buttons** - Visible when row is selected
 - **Scrollable** - Handle large lists with viewport culling
+- **Order persistence** - Stock order saved and restored on restart
 
 ### Data Loading
 
@@ -162,6 +239,7 @@ Last: 14:30:05                                      Press Ctrl+C to exit
 - **Mouse support** - Full mouse interaction for clicks and selection
 - **Responsive layout** - Flexbox layout adapts to terminal size
 - **Clean exit** - Graceful shutdown with Ctrl+C
+- **Portfolio summary** - Total portfolio value and P&L shown beside search
 
 ## Data Sources
 
@@ -171,18 +249,40 @@ The application uses Yahoo Finance's v8 chart endpoint as the primary data sourc
 
 - **Stock Data Endpoint:** `https://query1.finance.yahoo.com/v8/finance/chart/{symbol}`
 - **Search Endpoint:** `https://query2.finance.yahoo.com/v1/finance/search`
-- **CAC40 Symbols:** French stocks with `.PA` suffix (e.g., `LVMH.PA`, `AI.PA`)
+- **Historical Data:** `https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1={timestamp}&period2={timestamp}`
 - **Update Frequency:** Every 60 seconds
 - **Initial Load:** Smart batching with progress tracking
 
-### Default Tracked Stocks
+## Portfolio Data Structure
 
-The application starts with these CAC40 stocks:
+The portfolio is stored in `data/portfolio.json`:
 
-- Air Liquide (AI.PA)
-- Alstom (ALO.PA)
-- ArcelorMittal (MT.AS)
-- BNP Paribas (BNP.PA)
+```json
+{
+  "positions": [
+    {
+      "symbol": "AAPL",
+      "name": "Apple Inc.",
+      "transactions": [
+        {
+          "id": "abc123",
+          "type": "BUY",
+          "date": "2026-03-01",
+          "qty": 10,
+          "pricePerShare": 200.00
+        },
+        {
+          "id": "def456",
+          "type": "SELL",
+          "date": "2026-03-15",
+          "qty": 5,
+          "pricePerShare": 220.00
+        }
+      ]
+    }
+  ]
+}
+```
 
 ## Domain Model
 
@@ -191,14 +291,18 @@ The application starts with these CAC40 stocks:
 - **Stock** - Represents individual stocks with price calculations and formatting
 - **Price** - Value object with currency and formatting logic
 - **MarketData** - Aggregate containing multiple stocks with market analysis
+- **Position** - Portfolio position with transaction history
+- **Transaction** - BUY or SELL transaction with date, quantity, and price
 - **SearchResult** - Search result entity with symbol, name, and exchange info
 
 ### Business Logic
 
+- FIFO cost basis calculation for realized P&L
 - Price change calculations (absolute and percentage)
 - Volume formatting (K, M, B notation)
 - Market sentiment analysis (Bullish/Bearish/Neutral)
 - Data freshness validation
+- Position summary aggregation
 
 ## Development
 
@@ -209,18 +313,16 @@ The application starts with these CAC40 stocks:
 3. **Type Safety** - Full TypeScript coverage for reliability
 4. **Progress Tracking** - Real-time feedback during batch loading
 5. **Performance** - Native OpenTUI rendering with viewport culling
+6. **Persistence** - JSON file storage for portfolio data
 
 ### Testing
 
 ```bash
-# Run tests
-bun run test
-
 # Type checking
 bun run type-check
 
 # Manual testing
-bun run dev
+bun run src/main.ts
 ```
 
 ### Extending
@@ -230,7 +332,8 @@ The modular architecture makes it easy to:
 - Add new stock exchanges or indices
 - Integrate different data providers
 - Implement additional UI components
-- Add features like alerts or historical charts
+- Add features like alerts, price targets, or historical charts
+- Export portfolio reports (CSV, PDF)
 
 ## License
 
