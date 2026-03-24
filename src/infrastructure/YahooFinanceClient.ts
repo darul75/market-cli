@@ -114,6 +114,80 @@ export class YahooFinanceClient {
   }
 
   /**
+   * Fetch historical price data for a range
+   */
+  public async fetchPriceHistory(symbol: string, range: string, interval: string): Promise<{ date: string; price: number }[]> {
+    try {
+      const now = new Date();
+      let period1: number;
+
+      switch (range) {
+        case '1d':
+          period1 = Math.floor((now.getTime() - 24 * 60 * 60 * 1000) / 1000);
+          break;
+        case '5d':
+          period1 = Math.floor((now.getTime() - 5 * 24 * 60 * 60 * 1000) / 1000);
+          break;
+        case '1mo':
+          period1 = Math.floor((now.getTime() - 35 * 24 * 60 * 60 * 1000) / 1000);
+          break;
+        case '6mo':
+          period1 = Math.floor((now.getTime() - 190 * 24 * 60 * 60 * 1000) / 1000);
+          break;
+        default:
+          period1 = Math.floor((now.getTime() - 35 * 24 * 60 * 60 * 1000) / 1000);
+      }
+
+      const period2 = Math.floor(now.getTime() / 1000) + 86400;
+
+      const url = `${this.baseUrl}/v8/finance/chart/${symbol}`;
+      const response: AxiosResponse = await axios.get(url, {
+        timeout: this.timeout,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        params: {
+          period1,
+          period2,
+          interval,
+          includePrePost: false,
+          events: 'div,splits'
+        }
+      });
+
+      const chartData = response.data?.chart?.result?.[0];
+      if (!chartData) {
+        console.log(`[YahooFinance] ${symbol} no chart data`);
+        return [];
+      }
+
+      const timestamps = chartData.timestamp as number[] | undefined;
+      const closes = chartData.indicators?.quote?.[0]?.close as number[] | undefined;
+
+      if (!timestamps || !closes) {
+        console.log(`[YahooFinance] ${symbol} no timestamps or closes`);
+        return [];
+      }
+
+      const result: { date: string; price: number }[] = [];
+      for (let i = 0; i < timestamps.length; i++) {
+        if (closes[i] !== null) {
+          const date = new Date(timestamps[i] * 1000);
+          const dateStr = interval === '1d' 
+            ? date.toISOString().split('T')[0]
+            : date.toISOString().split('T')[0];
+          result.push({ date: dateStr, price: closes[i] });
+        }
+      }
+
+      return result;
+    } catch (error) {
+      console.warn(`⚠️ Failed to fetch price history for ${symbol}:`, error);
+      return [];
+    }
+  }
+
+  /**
    * Fetch historical closing price for a specific date
    */
   public async fetchHistoricalPrice(symbol: string, date: string): Promise<number | null> {

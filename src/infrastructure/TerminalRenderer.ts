@@ -5,6 +5,8 @@ import { AppStatus, SearchService } from '../application/index.js';
 import { SearchPanel } from './search/index.js';
 import { PortfolioStore } from './PortfolioStore.js';
 import { HistoricalPriceService } from './HistoricalPriceService.js';
+import { PortfolioHistoryService, PortfolioHistorySummary } from './PortfolioHistoryService.js';
+import { AsciiChart } from './AsciiChart.js';
 
 function debugLog(msg: string): void {
   try {
@@ -53,7 +55,7 @@ export class TerminalRenderer {
   private historicalPriceService: HistoricalPriceService = new HistoricalPriceService();
 
   // Dialog state
-  private dialogMode: 'none' | 'buy' | 'sell' = 'none';
+  private dialogMode: 'none' | 'buy' | 'sell' | 'portfolioGraph' = 'none';
   private dialogSymbol: string = '';
   private dialogYear: number = new Date().getFullYear();
   private dialogMonth: number = new Date().getMonth();
@@ -63,6 +65,12 @@ export class TerminalRenderer {
   private dialogUseDayPrice: boolean = true;
   private dialogFetchingPrice: boolean = false;
   private dialogFetchTimer?: NodeJS.Timeout;
+
+  // Portfolio graph state
+  private portfolioHistoryService: PortfolioHistoryService = new PortfolioHistoryService();
+  private graphSelectedRange: '1d' | '5d' | '1mo' | '6mo' | 'ytd' | '1y' | '5y' | 'max' = '1mo';
+  private graphData: PortfolioHistorySummary | null = null;
+  private graphLoading: boolean = false;
 
   // Expanded purchase history panels
   private expandedSymbols: Set<string> = new Set();
@@ -395,6 +403,8 @@ export class TerminalRenderer {
     const plColor = total.pl >= 0 ? '#00FF00' : '#FF0000';
     const plStr = `${plSign}${currencySymbol}${total.pl.toFixed(0)} (${plSign}${total.plPercent.toFixed(1)}%)`;
 
+    const hasTransactions = this.positions.some(p => p.transactions.length > 0);
+
     return Box(
       {
         id: 'portfolio-total',
@@ -410,14 +420,23 @@ export class TerminalRenderer {
         {
           width: '100%',
           flexDirection: 'row',
-          justifyContent: 'center',
+          justifyContent: 'space-between',
           alignItems: 'center',
           height: 1
         },
         Text({
           content: '💼 Portfolio',
           fg: '#00FF00'
-        })
+        }),
+        hasTransactions ? Box(
+          {
+            width: 3,
+            height: 1,
+            backgroundColor: '#222244',
+            onMouseDown: (e: any) => { e.stopPropagation(); this.openPortfolioGraphDialog(); }
+          },
+          Text({ content: '📊', width: 2, fg: '#00BFFF' })
+        ) : Box({ width: 3 })
       ),
       Box(
         {
@@ -503,7 +522,7 @@ export class TerminalRenderer {
             alignItems: 'center',
             zIndex: 100
           },
-          this.createTransactionDialog()
+          this.dialogMode === 'portfolioGraph' ? this.createPortfolioGraphDialog() : this.createTransactionDialog()
         )
       );
     }
@@ -1392,7 +1411,7 @@ export class TerminalRenderer {
   }
 
   private createTransactionDialog(): any {
-    if (this.dialogMode === 'none') return null;
+    if (this.dialogMode === 'none' || this.dialogMode === 'portfolioGraph') return null;
 
     const isBuy = this.dialogMode === 'buy';
     const symbol = this.dialogSymbol;
@@ -1493,6 +1512,154 @@ export class TerminalRenderer {
             onMouseDown: loading ? undefined : ((e: any) => { e.stopPropagation(); isBuy ? this.confirmBuy() : this.confirmSell(); })
           },
           Text({ content: okBtnText, width: 9, fg: okBtnFg })
+        )
+      )
+    );
+  }
+
+  async openPortfolioGraphDialog(): Promise<void> {
+    this.dialogMode = 'portfolioGraph';
+    this.graphSelectedRange = '1mo';
+    this.graphData = null;
+    this.graphLoading = true;
+    this.renderWithCurrentStatus();
+
+    const positionsWithTransactions = this.positions.filter(p => p.transactions.length > 0);
+    this.graphData = await this.portfolioHistoryService.getPortfolioHistory(positionsWithTransactions, this.graphSelectedRange);
+    this.graphLoading = false;
+    this.renderWithCurrentStatus();
+  }
+
+  private closePortfolioGraphDialog(): void {
+    this.dialogMode = 'none';
+    this.graphData = null;
+    this.renderWithCurrentStatus();
+  }
+
+  async changeGraphRange(range: '1d' | '5d' | '1mo' | '6mo' | 'ytd' | '1y' | '5y' | 'max'): Promise<void> {
+    this.graphSelectedRange = range;
+    this.graphLoading = true;
+    this.graphData = null;
+    this.renderWithCurrentStatus();
+
+    const positionsWithTransactions = this.positions.filter(p => p.transactions.length > 0);
+    this.graphData = await this.portfolioHistoryService.getPortfolioHistory(positionsWithTransactions, range);
+    this.graphLoading = false;
+    this.renderWithCurrentStatus();
+  }
+
+  private createPortfolioGraphDialog(): any {
+    if (this.dialogMode !== 'portfolioGraph') return null;
+
+    const titleColor = '#00BFFF';
+    const ranges: { key: '1d' | '5d' | '1mo' | '6mo' | 'ytd' | '1y' | '5y' | 'max'; label: string }[] = [
+      { key: '1d', label: '1D' },
+      { key: '5d', label: '5D' },
+      { key: '1mo', label: '1M' },
+      { key: '6mo', label: '6M' },
+      { key: 'ytd', label: 'YTD' },
+      { key: '1y', label: '1Y' },
+      { key: '5y', label: '5Y' },
+      { key: 'max', label: 'MAX' }
+    ];
+
+    const rangeButtons = ranges.map(r => {
+      const isSelected = this.graphSelectedRange === r.key;
+      const bg = isSelected ? '#004466' : '#222244';
+      const fg = isSelected ? '#00BFFF' : '#888888';
+      return Box(
+        {
+          width: 4,
+          height: 1,
+          backgroundColor: bg,
+          onMouseDown: (e: any) => { e.stopPropagation(); this.changeGraphRange(r.key); }
+        },
+        Text({ content: r.label, width: 4, fg })
+      );
+    });
+
+    const chartContent: any[] = [];
+
+    if (this.graphLoading) {
+      chartContent.push(
+        Box(
+          { width: '100%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 10 },
+          Text({ content: 'Loading chart data...', fg: '#888888' })
+        )
+      );
+    } else if (this.graphData && this.graphData.dataPoints.length > 0) {
+      const chartResult = AsciiChart.renderWithGradient(this.graphData.dataPoints, 35, 10);
+      const changeColor = this.graphData.change >= 0 ? '#00FF00' : '#FF0000';
+      const changeSign = this.graphData.change >= 0 ? '+' : '';
+
+      chartContent.push(
+        ...chartResult.lines.map((line, rowIdx) =>
+          Box(
+            { width: '100%', flexDirection: 'row', justifyContent: 'center' },
+            Text({ content: line, fg: '#00FF00' })
+          )
+        ),
+        Box({ width: '100%', height: 1 }),
+        Box(
+          { width: '100%', flexDirection: 'row', justifyContent: 'space-between' },
+          Text({ content: `Min: €${this.graphData.minValue.toFixed(0)}`, fg: '#FF6666' }),
+          Text({ content: `Max: €${this.graphData.maxValue.toFixed(0)}`, fg: '#00FF00' })
+        ),
+        Box({ width: '100%', height: 1 }),
+        Box(
+          { width: '100%', flexDirection: 'row', justifyContent: 'space-between' },
+          Text({ content: `Start: €${this.graphData.startValue.toFixed(0)}`, fg: '#888888' }),
+          Text({ content: `Now: €${this.graphData.currentValue.toFixed(0)}`, fg: '#FFFFFF' })
+        ),
+        Box({ width: '100%', height: 1 }),
+        Box(
+          { width: '100%', flexDirection: 'row', justifyContent: 'center' },
+          Text({ content: `${changeSign}€${this.graphData.change.toFixed(0)} (${changeSign}${this.graphData.changePercent.toFixed(2)}%)`, fg: changeColor })
+        )
+      );
+    } else {
+      chartContent.push(
+        Box(
+          { width: '100%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 10 },
+          Text({ content: 'No data available', fg: '#FF6666' }),
+          Text({ content: 'Make some transactions to see the graph', fg: '#888888' })
+        )
+      );
+    }
+
+    return Box(
+      {
+        id: 'portfolio-graph-dialog',
+        width: 55,
+        flexDirection: 'column',
+        borderStyle: 'double',
+        borderColor: titleColor,
+        backgroundColor: '#08081a',
+        padding: 1,
+        zIndex: 100
+      },
+      Text({ content: '📈 Portfolio Evolution', fg: titleColor }),
+      Box({ width: '100%', height: 1 }),
+      Box(
+        { width: '100%', flexDirection: 'row', gap: 1 },
+        ...rangeButtons
+      ),
+      Box({ width: '100%', height: 1 }),
+      Box(
+        { width: '100%', flexDirection: 'column', borderStyle: 'single', borderColor: '#333333', paddingLeft: 1, paddingRight: 1 },
+        ...chartContent
+      ),
+      Box({ width: '100%', height: 1 }),
+      Box(
+        { width: '100%', flexDirection: 'row', justifyContent: 'center' },
+        Box(
+          {
+            width: 10,
+            height: 1,
+            backgroundColor: '#440000',
+            onMouseDown: (e: any) => { e.stopPropagation(); this.closePortfolioGraphDialog(); }
+          },
+          Text({ content: '  [Close]  ', width: 10, fg: '#FF4444' })
         )
       )
     );
