@@ -214,10 +214,17 @@ export class SearchPanel {
           fg: '#00FF00'
         })
       ),
-      
+      Box({        
+        width: '100%',
+        height: 3,
+        borderStyle: 'single',
+        borderColor: '#666666',
+        backgroundColor: '#000000',
+        paddingLeft: 1,        
+      }, 
       // Search input
       inputComponent,
-      
+      ),
       // Results table  
       tableComponent
     );

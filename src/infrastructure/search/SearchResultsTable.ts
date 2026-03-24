@@ -47,7 +47,7 @@ export class SearchResultsTable {
       id: 'search-results-table',
       width: '100%',
       flexDirection: 'column',
-      marginTop: 1,
+      marginTop: 0,
       flexShrink: 0,
       height: 8
     },
@@ -85,7 +85,7 @@ private createScrollableResults(): any {
     return Box({
       id: 'no-results-row',
       width: '100%',
-      height: 1,
+      height: 3,
       justifyContent: 'center',
       alignItems: 'center',
       padding: 1,

@@ -63,7 +63,6 @@ export class TerminalRenderer {
   private dialogQty: string = '';
   private dialogPrice: string = '';
   private dialogMessage: string = '';
-  private dialogUseDayPrice: boolean = true;
   private dialogFetchingPrice: boolean = false;
   private dialogFetchTimer?: NodeJS.Timeout;
 
@@ -93,7 +92,6 @@ export class TerminalRenderer {
 
       // Use keyInput EventEmitter to capture keyboard events
       (this.renderer as any).keyInput?.on('keypress', (key: any) => {
-        debugLog('Key press: ' + key.name);
         if (key.name === 'escape' && this.dialogMode !== 'none') {
           this.closeDialog();
         }
@@ -141,7 +139,7 @@ export class TerminalRenderer {
       
       debugLog('✅ OpenTUI renderer initialized successfully');
     } catch (error) {
-      debugLog('❌ Failed to initialize OpenTUI renderer: ' + error);
+      debugLog(`❌ Failed to initialize OpenTUI renderer: ${error}`);
       throw error;
     }
   }
@@ -173,9 +171,6 @@ export class TerminalRenderer {
     this.resizeTimeout = setTimeout(() => {
       // Preserve relative scroll position during resize
       this.preserveRelativeScrollPosition();
-      
-      // The flex layout will automatically handle the resize
-      // OpenTUI's flex system should adapt ScrollBox height automatically
       
       // Restore relative scroll position after resize
       this.restoreRelativeScrollPosition();
@@ -935,7 +930,8 @@ export class TerminalRenderer {
         height: 1,
         backgroundColor: '#333333',
         flexDirection: 'row',
-        padding: 1
+        paddingLeft: 1,
+        paddingRight: 1,
       },
       Text({ content: '#', width: 5, fg: '#FFFFFF' }),
       Text({ content: 'Symbol', width: 10, fg: '#FFFFFF' }),
