@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      
+      - name: Install dependencies
+        run: bun install
+      
+      - name: Build macOS x64
+        run: bun build src/main.ts --compile --outfile=market-cli-macos-x64
+        env:
+          BUN_target: darwin-x64
+      
+      - name: Build macOS ARM64
+        run: bun build src/main.ts --compile --outfile=market-cli-macos-arm64
+        env:
+          BUN_target: darwin-aarch64
+      
+      - name: Build Linux x64
+        run: bun build src/main.ts --compile --outfile=market-cli-linux-x64
+        env:
+          BUN_target: linux-x64
+      
+      - name: Build Windows x64
+        run: bun build src/main.ts --compile --outfile=market-cli-windows-x64
+        env:
+          BUN_target: windows-x64
+      
+      - name: Generate checksums
+        run: |
+          sha256sum market-cli-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            market-cli-*
+            SHA256SUMS.txt
