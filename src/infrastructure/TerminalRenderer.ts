@@ -341,9 +341,6 @@ export class TerminalRenderer {
       () => this.renderWithCurrentStatus()
     );
     
-    // Set up portfolio total getter for footer display
-    this.searchPanel.setPortfolioTotalGetter(() => this.getPortfolioTotal());
-    
     debugLog('Search panel created successfully');
   }
 
@@ -357,6 +354,88 @@ export class TerminalRenderer {
     }
     
     return this.searchPanel.render();
+  }
+
+  /**
+   * Create search panel and portfolio total side by side
+   */
+  private createSearchWithTotal(): any {
+    const searchPanel = this.createSearchPanel();
+    const portfolioTotal = this.createPortfolioTotalBox();
+
+    return Box(
+      {
+        width: '100%',
+        flexDirection: 'row',
+        gap: 1
+      },
+      searchPanel || Box({}),
+      portfolioTotal
+    );
+  }
+
+  /**
+   * Create portfolio total display box
+   */
+  private createPortfolioTotalBox(): any {
+    const total = this.getPortfolioTotal();
+    const currencySymbol = '€';
+    const valueStr = `${currencySymbol}${total.value.toFixed(0)}`;
+    const plSign = total.pl >= 0 ? '+' : '';
+    const plColor = total.pl >= 0 ? '#00FF00' : '#FF0000';
+    const plStr = `${plSign}${currencySymbol}${total.pl.toFixed(0)} (${plSign}${total.plPercent.toFixed(1)}%)`;
+
+    return Box(
+      {
+        id: 'portfolio-total',
+        width: 26,
+        flexDirection: 'column',
+        borderStyle: 'single',
+        borderColor: '#666666',
+        backgroundColor: '#000000',
+        paddingLeft: 1,
+        paddingRight: 1
+      },
+      Box(
+        {
+          width: '100%',
+          flexDirection: 'row',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: 1
+        },
+        Text({
+          content: '💼 Portfolio',
+          fg: '#00FF00'
+        })
+      ),
+      Box(
+        {
+          width: '100%',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: 1
+        },
+        Text({
+          content: valueStr,
+          fg: '#FFFFFF'
+        })
+      ),
+      Box(
+        {
+          width: '100%',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: 1
+        },
+        Text({
+          content: plStr,
+          fg: plColor
+        })
+      )
+    );
   }
 
   /**
@@ -374,6 +453,9 @@ export class TerminalRenderer {
     // Clear previous content first
     this.clearScreen();
 
+    // Create search panel and portfolio total side by side
+    const searchAndTotal = this.createSearchWithTotal();
+
     // Normal content column
     const content = Box(
       {
@@ -384,7 +466,7 @@ export class TerminalRenderer {
       this.createHeader(status),
       this.createMarketSummary(marketData),
       this.createStockTable(marketData.stocks),
-      this.createSearchPanel(),
+      searchAndTotal,
       this.createFooter(status)
     );
 
