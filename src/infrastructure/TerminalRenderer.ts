@@ -98,6 +98,14 @@ export class TerminalRenderer {
           this.closeDialog();
         }
 
+        // Enter key confirms buy/sell
+        if (key.name === 'return' && this.dialogMode === 'buy') {
+          this.confirmBuy();
+        }
+        if (key.name === 'return' && this.dialogMode === 'sell') {
+          this.confirmSell();
+        }
+
         // 'b' opens buy dialog
         if (!this.searchActive && key.name === 'b' && this.selectedSymbol && this.dialogMode === 'none') {
           const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
