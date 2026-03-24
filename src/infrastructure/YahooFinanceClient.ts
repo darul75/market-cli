@@ -11,39 +11,15 @@ export class YahooFinanceClient {
   private readonly requestDelay = 800; // 0.8 seconds between requests for reliable fetching
   private readonly batchSize = 8; // Fetch 8 stocks per batch
   private readonly batchDelay = 2000; // 2 seconds between batches
-
-  /**
-   * CAC40 constituent symbols (major companies) - Updated with correct symbols
-   */
-  private readonly cac40Symbols = [
-    'AI.PA',     // Air Liquide
-    'ALO.PA',    // Alstom
-    'MT.AS',     // ArcelorMittal
-    'BNP.PA',    // BNP Paribas
-    // 'EN.PA',     // Bouygues
-    // 'CAP.PA',    // Capgemini
-    // 'CA.PA',     // Carrefour
-    // 'ACA.PA',    // Crédit Agricole
-    // 'BN.PA',     // Danone
-    // 'ENGI.PA',   // Engie
-    // 'RMS.PA',    // Hermès
-    // 'KER.PA',    // Kering
-    // 'MC.PA',     // LVMH (Correct symbol)
-    // 'OR.PA',     // L'Oréal
-    // 'RI.PA',     // Pernod Ricard
-    // 'SAF.PA',    // Safran
-    // 'SAN.PA',    // Sanofi
-    // 'GLE.PA',    // Société Générale
-    // 'TTE.PA',    // TotalEnergies (Updated from FP.PA)
-    // 'VIV.PA'     // Vivendi
-  ];
+  
+  public symbols: string[] = [];
 
   /**
    * Test API connection by fetching a single stock
    */
   async testConnection(): Promise<boolean> {
     try {
-      const testSymbol = 'AI.PA'; // Use first CAC40 stock for testing
+      const testSymbol = this.symbols.length > 0 ? this.symbols[0] : 'AAPL';
       const data = await this.fetchSingleStock(testSymbol);
       return data !== null;
     } catch (error) {
@@ -53,12 +29,11 @@ export class YahooFinanceClient {
   }
 
   /**
-   * Fetch stock data for CAC40 stocks using v8/finance/chart endpoint with smart batching
+   * Fetch stock data for configured symbols using v8/finance/chart endpoint with smart batching
    */
-  async fetchCAC40Stocks(): Promise<ApiResponse> {
+  async fetchStocks(): Promise<ApiResponse> {
     try {
-      // Use all available stocks (20 stocks)
-      const symbols = this.cac40Symbols;
+      const symbols = this.symbols;
       const stockData: StockData[] = [];
 
       // Initialize progress tracking
@@ -101,69 +76,6 @@ export class YahooFinanceClient {
         // Add longer delay between batches (except after the last batch)
         if (batchIndex < batches.length - 1) {
           await this.sleep(this.batchDelay);
-        }
-      }
-
-      if (stockData.length === 0) {
-        throw new Error('No stock data could be fetched from Yahoo Finance API');
-      }
-
-      return {
-        success: true,
-        data: stockData,
-        timestamp: new Date().toISOString()
-      };
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      return {
-        success: false,
-        data: [],
-        error: `Yahoo Finance API Error: ${errorMessage}`,
-        timestamp: new Date().toISOString()
-      };
-    }
-  }
-
-  /**
-   * Fetch stock data for a limited number of stocks for testing (first 3)
-   */
-  async fetchLimitedStocks(): Promise<ApiResponse> {
-    try {
-      // Use only first 3 stocks for testing
-      const symbols = this.cac40Symbols.slice(0, 3);
-      const stockData: StockData[] = [];
-
-      // Initialize progress tracking
-      const batches = this.createBatches(symbols, this.batchSize);
-      progressTracker.startTracking(symbols.length, batches.length);
-      
-      // Process stocks sequentially
-      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-        const batch = batches[batchIndex];
-        const batchNumber = batchIndex + 1;
-        
-        progressTracker.updateBatch(batchNumber, batch);
-        
-        for (const symbol of batch) {
-          try {
-            progressTracker.updateCurrentSymbol(symbol);
-            
-            const data = await this.fetchSingleStock(symbol);
-            if (data) {
-              stockData.push(data);
-              progressTracker.addSuccess(symbol);
-            } else {
-              progressTracker.addError(symbol, 'No data returned from API');
-            }
-            
-            if (symbol !== batch[batch.length - 1]) {
-              await this.sleep(this.requestDelay);
-            }
-          } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            progressTracker.addError(symbol, errorMessage);
-            continue;
-          }
         }
       }
 

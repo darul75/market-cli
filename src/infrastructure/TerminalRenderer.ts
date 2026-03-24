@@ -231,18 +231,25 @@ export class TerminalRenderer {
    * Handle move up action
    */
   private handleMoveUp(index: number): void {
-    // Don't do anything if already at top
     if (index <= 0) return;
     
-    // Swap with previous element
-    const temp = this.marketData!.stocks[index];
-    this.marketData!.stocks[index] = this.marketData!.stocks[index - 1];
-    this.marketData!.stocks[index - 1] = temp;
+    const stock = this.marketData!.stocks[index];
+    const prevStock = this.marketData!.stocks[index - 1];
     
-    // Update selection to follow moved item
+    // Swap in marketData
+    this.marketData!.stocks[index] = prevStock;
+    this.marketData!.stocks[index - 1] = stock;
+    
+    // Sync positions order
+    const stockIdx = this.positions.findIndex(p => p.symbol === stock.symbol);
+    const prevIdx = this.positions.findIndex(p => p.symbol === prevStock.symbol);
+    if (stockIdx > -1 && prevIdx > -1) {
+      [this.positions[stockIdx], this.positions[prevIdx]] = 
+      [this.positions[prevIdx], this.positions[stockIdx]];
+    }
+    
     this.selectedIndex = index - 1;
-    
-    // Re-render
+    this.savePortfolio();
     this.renderWithCurrentStatus();
   }
 
@@ -250,18 +257,25 @@ export class TerminalRenderer {
    * Handle move down action
    */
   private handleMoveDown(index: number): void {
-    // Don't do anything if already at bottom
     if (index >= this.marketData!.stocks.length - 1) return;
     
-    // Swap with next element
-    const temp = this.marketData!.stocks[index];
-    this.marketData!.stocks[index] = this.marketData!.stocks[index + 1];
-    this.marketData!.stocks[index + 1] = temp;
+    const stock = this.marketData!.stocks[index];
+    const nextStock = this.marketData!.stocks[index + 1];
     
-    // Update selection to follow moved item
+    // Swap in marketData
+    this.marketData!.stocks[index] = nextStock;
+    this.marketData!.stocks[index + 1] = stock;
+    
+    // Sync positions order
+    const stockIdx = this.positions.findIndex(p => p.symbol === stock.symbol);
+    const nextIdx = this.positions.findIndex(p => p.symbol === nextStock.symbol);
+    if (stockIdx > -1 && nextIdx > -1) {
+      [this.positions[stockIdx], this.positions[nextIdx]] = 
+      [this.positions[nextIdx], this.positions[stockIdx]];
+    }
+    
     this.selectedIndex = index + 1;
-    
-    // Re-render
+    this.savePortfolio();
     this.renderWithCurrentStatus();
   }
 
@@ -269,13 +283,19 @@ export class TerminalRenderer {
    * Handle delete action
    */
   private handleDelete(index: number): void {
+    const stock = this.marketData!.stocks[index];
+
     // Remove stock from array
     this.marketData!.stocks.splice(index, 1);
+
+    this.positions = this.positions.filter(p => p.symbol !== stock.symbol);
     
     // Adjust selection if needed
     if (this.selectedIndex >= this.marketData!.stocks.length) {
       this.selectedIndex = Math.max(0, this.marketData!.stocks.length - 1);
     }
+    
+    this.savePortfolio();
     
     // Re-render
     this.renderWithCurrentStatus();
@@ -554,6 +574,38 @@ export class TerminalRenderer {
   }
 
   /**
+   * Render empty state when no stocks in portfolio
+   */
+  renderEmptyState(message: string = 'Press Ctrl+F to search and add stocks'): void {
+    if (!this.isInitialized) return;
+    
+    this.clearScreen();
+    
+    this.renderer.root.add(
+      Box(
+        {
+          width: '100%',
+          height: '100%',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: 2
+        },
+        Text({
+          content: '📊 No stocks in portfolio',
+          fg: '#00FFFF',
+          width: 30
+        }),
+        Box({ width: '100%', height: 1 }),
+        Text({
+          content: message,
+          fg: '#888888'
+        })
+      )
+    );
+  }
+
+  /**
    * Create header component
    */
   private createHeader(status: AppStatus) {
@@ -691,14 +743,14 @@ export class TerminalRenderer {
         flexDirection: 'row',
         padding: 1
       },
-      Text({ content: '#', width: 2, fg: '#FFFFFF' }),
+      Text({ content: '#', width: 3, fg: '#FFFFFF' }),
       Text({ content: 'Symbol', width: 10, fg: '#FFFFFF' }),
       Text({ content: 'Price', width: 10, fg: '#FFFFFF' }),
-      Text({ content: 'Change', width: 7, fg: '#FFFFFF' }),
-      Text({ content: 'Qty', width: 5, fg: '#FFFFFF' }),
+      Text({ content: 'Change', width: 10, fg: '#FFFFFF' }),
+      Text({ content: 'Qty', width: 7, fg: '#FFFFFF' }),
       Text({ content: 'Cost', width: 9, fg: '#FFFFFF' }),
       Text({ content: 'Value', width: 10, fg: '#FFFFFF' }),
-      Text({ content: 'P&L', width: 11, fg: '#FFFFFF' }),
+      Text({ content: 'P&L', width: 15, fg: '#FFFFFF' }),
       Text({ content: 'Actions', width: 18, fg: '#AAAAFF' })
     );
   }
@@ -721,7 +773,10 @@ export class TerminalRenderer {
     
     const hasPosition = pos.qty > 0;
     const currencySymbol = stock.price.currency === 'EUR' ? '€' : stock.price.currency;
-    
+
+    const moveUpButton = this.createActionButton('🔼', '#00FF00', () => this.handleMoveUp(index - 1), isSelected, !pos.qty || pos.qty === 0 ? 4: 2);
+    const moveDownButton = this.createActionButton('🔽', '#FFFF00', () => this.handleMoveDown(index - 1), isSelected);    
+
     const qtyText = hasPosition ? pos.qty.toString() : '-';
     const costText = hasPosition ? `${currencySymbol}${pos.totalCost.toFixed(0)}` : '-';
     const valueText = hasPosition ? `${currencySymbol}${pos.currentValue.toFixed(0)}` : '-';
@@ -764,15 +819,15 @@ export class TerminalRenderer {
           }
         }
       },
-      Text({ content: index.toString(), width: 2, fg: '#CCCCCC' }),
+      Text({ content: index.toString(), width: 3, fg: '#CCCCCC' }),
       Text({ content: stock.symbol, width: 10, fg: symbolColor }),
       Text({ content: stock.price.amount.toFixed(2), width: 10, fg: '#FFFFFF' }),
-      Text({ content: stock.formattedPriceChange, width: 7, fg: changeColor }),
-      Text({ content: qtyText, width: 5, fg: hasPosition ? '#FFFFFF' : '#666666' }),
+      Text({ content: stock.formattedPriceChange, width: 10, fg: changeColor }),
+      Text({ content: qtyText, width: 7, fg: hasPosition ? '#FFFFFF' : '#666666' }),
       Text({ content: costText, width: 9, fg: hasPosition ? '#888888' : '#666666' }),
       Text({ content: valueText, width: 10, fg: hasPosition ? '#FFFFFF' : '#666666' }),
       Text({ content: plText, width: 7, fg: hasPosition ? plColor : '#666666' }),
-      Text({ content: plPctText, width: 4, fg: hasPosition ? plColor : '#666666' }),
+      Text({ content: plPctText, width: 8, fg: hasPosition ? plColor : '#666666' }),
       buttonSpacer,
       buyBtn,
       buttonSpacer,
@@ -780,7 +835,11 @@ export class TerminalRenderer {
       buttonSpacer,
       detailsBtn,
       buttonSpacer,
-      deleteBtn
+      deleteBtn,
+      buttonSpacer,
+      moveUpButton,
+      buttonSpacer,
+      moveDownButton
     );
   }
 

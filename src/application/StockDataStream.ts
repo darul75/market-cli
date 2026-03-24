@@ -43,6 +43,13 @@ export class StockDataStream {
   }
 
   /**
+   * Set symbols to fetch on next start
+   */
+  public setSymbols(symbols: string[]): void {
+    this.apiClient.symbols = symbols;
+  }
+
+  /**
    * Observable for market data updates
    */
   public get marketData$(): Observable<MarketData> {
@@ -343,8 +350,7 @@ export class StockDataStream {
   private async fetchMarketData(): Promise<any> {
     console.log('🔍 DEBUG: fetchMarketData() called');
     try {
-      // Use all CAC40 stocks (20 stocks)
-      const response = await this.apiClient.fetchCAC40Stocks();
+      const response = await this.apiClient.fetchStocks();
       console.log('📊 DEBUG: API response received:', response.success ? 'SUCCESS' : 'FAILED');
       if (response.success) {
         console.log(`📈 DEBUG: Fetched ${response.data?.length} stocks successfully`);

@@ -28,7 +28,7 @@ export class StockMonitorApp {
   /**
    * Start the stock monitoring application
    */
-  public start(): {
+  public start(symbols?: string[]): {
     marketData$: Observable<MarketData>;
     status$: Observable<AppStatus>;
     stocks$: Observable<Stock[]>;
@@ -38,8 +38,13 @@ export class StockMonitorApp {
       return this.getObservables();
     }
 
-    console.log('🚀 Starting CAC40 Stock Monitor...');
+    console.log('🚀 Starting Stock Monitor...');
     this.isRunning = true;
+
+    // Set symbols to fetch
+    if (symbols && symbols.length > 0) {
+      this.dataStream.setSymbols(symbols);
+    }
 
     // Configure data stream for live updates with 1-minute refresh
     this.dataStream.setLiveUpdatesEnabled(true);

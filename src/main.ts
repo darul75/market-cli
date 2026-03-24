@@ -9,7 +9,7 @@ import { combineLatest } from 'rxjs';
  * Main application entry point
  */
 async function main(): Promise<void> {
-  console.log('🚀 Starting CAC40 Live Monitor...\n');
+  console.log('🚀 Starting Stock Monitor...\n');
   
   let app: StockMonitorApp | null = null;
   let renderer: TerminalRenderer | null = null;
@@ -24,8 +24,10 @@ async function main(): Promise<void> {
     console.log('🎨 Initializing terminal interface...');
     await renderer.initialize();
     
-    // Load saved portfolio
-    renderer.loadPortfolio();
+    // Load saved portfolio first
+    const positions = renderer.loadPortfolio();
+    const symbols = positions.map(p => p.symbol);
+    console.log(`📂 Loaded ${positions.length} positions from portfolio`);
     
     // Set up search service
     const currentApp = app;
@@ -60,20 +62,34 @@ async function main(): Promise<void> {
     
     progressTracker.addListener(progressListener);
     
-    // Start the application
+    // Show initial loading state (or empty state if no symbols)
+    if (symbols.length === 0) {
+      renderer.renderEmptyState();
+    } else {
+      renderer.renderLoading();
+    }
+    
+    // Start the application with saved symbols
     console.log('📊 Starting data streams...');
-    const { marketData$, status$ } = app.start();
+    const { marketData$, status$ } = app.start(symbols);
     
-    // Show initial loading state
-    renderer.renderLoading();
-    
-    console.log('✅ Application started successfully!');
-    console.log('📈 Fetching live CAC40 data...\n');
+    if (symbols.length > 0) {
+      console.log(`📈 Fetching data for ${symbols.length} stocks...\n`);
+    } else {
+      console.log('📈 No stocks in portfolio. Use search to add stocks.\n');
+    }
     
     // Subscribe to reactive streams and update UI
     combineLatest([marketData$, status$]).subscribe({
       next: async ([marketData, status]) => {
         try {
+          if (symbols.length === 0) {
+            // Show empty state when no stocks
+            progressTracker.removeListener(progressListener);
+            renderer!.renderEmptyState();
+            return;
+          }
+          
           if (status.isLoading && !marketData) {
             // Progress will be handled by the progress tracker listener
             if (!currentProgress) {
@@ -86,15 +102,6 @@ async function main(): Promise<void> {
           } else if (marketData && !status.hasError) {
             // Show actual data
             progressTracker.removeListener(progressListener);
-            
-            // Add saved stocks to app if not already present
-            const savedSymbols = renderer!.getSavedSymbols();
-            for (const { symbol, name } of savedSymbols) {
-              if (!marketData.stocks.find(s => s.symbol === symbol)) {
-                await currentApp.addStock(symbol, name);
-              }
-            }
-            
             renderer!.renderStockTable(marketData, status);
           }
         } catch (renderError) {
