@@ -62,6 +62,7 @@ export class TerminalRenderer {
   private dialogDay: number = new Date().getDate();
   private dialogQty: string = '';
   private dialogPrice: string = '';
+  private dialogMessage: string = '';
   private dialogUseDayPrice: boolean = true;
   private dialogFetchingPrice: boolean = false;
   private dialogFetchTimer?: NodeJS.Timeout;
@@ -1344,6 +1345,7 @@ export class TerminalRenderer {
     this.dialogMonth = new Date().getMonth();
     this.dialogDay = new Date().getDate();
     this.dialogQty = '';
+    this.dialogMessage = '';
     
     const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
     this.dialogPrice = stock ? stock.price.amount.toFixed(2) : '';
@@ -1356,7 +1358,20 @@ export class TerminalRenderer {
   closeDialog(): void {
     this.dialogMode = 'none';
     this.dialogSymbol = '';
+    this.dialogMessage = '';
     this.renderWithCurrentStatus();
+  }
+
+  private getMaxSellQty(): number {
+    const position = this.getPosition(this.dialogSymbol);
+    if (!position) return 0;
+    const totalBuys = position.transactions
+      .filter(t => t.type === 'BUY')
+      .reduce((sum, t) => sum + t.qty, 0);
+    const totalSells = position.transactions
+      .filter(t => t.type === 'SELL')
+      .reduce((sum, t) => sum + t.qty, 0);
+    return totalBuys - totalSells;
   }
 
   private generateId(): string {
@@ -1417,6 +1432,8 @@ export class TerminalRenderer {
     const currentQty = totalBuys - totalSells;
 
     if (currentQty < qty) {
+      this.dialogMessage = `Max available: ${currentQty} shares`;
+      this.renderWithCurrentStatus();
       return;
     }
 
@@ -1526,9 +1543,18 @@ export class TerminalRenderer {
       Box(
         { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 1 },
         Text({ content: 'Qty: ', width: 5, fg: '#888888' }),
-        qtyInput
+        qtyInput,
+        !isBuy ? Box(
+          { flexDirection: 'row' },
+          Text({ content: ' (max: ' + this.getMaxSellQty() + ')', fg: '#666666' })
+        ) : Box({})
       ),
       Box({ width: '100%', height: 1 }),
+
+      this.dialogMessage ? Box(
+        { width: '100%', flexDirection: 'row', justifyContent: 'center' },
+        Text({ content: this.dialogMessage, fg: '#FF4444' })
+      ) : Box({ width: '100%', height: 1 }),
 
       Box(
         { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 1 },
@@ -1538,7 +1564,7 @@ export class TerminalRenderer {
       Box({ width: '100%', height: 1 }),
 
       Box(
-        { flexDirection: 'row', gap: 10 },
+        { width: '100%', flexDirection: 'row', justifyContent: 'center', gap: 10 },
         Box(
           {
             width: 9,
