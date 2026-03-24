@@ -1,12 +1,15 @@
 import { createCliRenderer, Box, Text, CliRenderer, ScrollBox, Input, InputRenderableEvents } from '@opentui/core';
-import { Stock, MarketData } from '../domain/index.js';
+import { Stock, MarketData, Position, Purchase } from '../domain/index.js';
+import { calculatePositionSummary, calculatePurchasesWithPL } from '../domain/PositionCalculator.js';
 import { AppStatus, SearchService } from '../application/index.js';
 import { SearchPanel } from './search/index.js';
-import * as fs from 'fs';
+import { PortfolioStore } from './PortfolioStore.js';
+import { HistoricalPriceService } from './HistoricalPriceService.js';
 
 function debugLog(msg: string): void {
   try {
-    fs.appendFileSync('/tmp/marker-cli-debug.log', `[${new Date().toISOString()}] TerminalRenderer: ${msg}\n`);
+    const fs2 = require('fs');
+    fs2.appendFileSync('/tmp/market-cli-debug.log', `[${new Date().toISOString()}] TerminalRenderer: ${msg}\n`);
   } catch {}
 }
 
@@ -40,10 +43,25 @@ export class TerminalRenderer {
   // Search panel (new architecture)
   private searchPanel: SearchPanel | null = null;
 
-  // Portfolio tracking: share quantities per symbol
-  private stockQuantities: Map<string, number> = new Map();
-  private editingSymbol: string | null = null;
-  private editingInputValue: string = '';
+  // Portfolio tracking
+  private positions: Position[] = [];
+  private portfolioStore: PortfolioStore = new PortfolioStore();
+  private historicalPriceService: HistoricalPriceService = new HistoricalPriceService();
+
+  // Dialog state
+  private dialogMode: 'none' | 'buy' | 'sell' = 'none';
+  private dialogSymbol: string = '';
+  private dialogYear: number = new Date().getFullYear();
+  private dialogMonth: number = new Date().getMonth();
+  private dialogDay: number = new Date().getDate();
+  private dialogQty: string = '';
+  private dialogPrice: string = '';
+  private dialogUseDayPrice: boolean = true;
+  private dialogFetchingPrice: boolean = false;
+  private dialogFetchTimer?: NodeJS.Timeout;
+
+  // Expanded purchase history panels
+  private expandedSymbols: Set<string> = new Set();
 
 
   /**
@@ -340,7 +358,6 @@ export class TerminalRenderer {
       this.createMarketSummary(marketData),
       this.createStockTable(marketData.stocks),
       this.createSearchPanel(),
-      this.createPortfolioSummary(),
       this.createFooter(status)
     );
 
@@ -351,12 +368,11 @@ export class TerminalRenderer {
       )
     );
 
-    if (this.editingSymbol) {
-      // True overlay: absolutely positioned full-screen wrapper centers the dialog
+    if (this.dialogMode !== 'none') {
       this.renderer.root.add(
         Box(
           {
-            id: 'qty-dialog-overlay',
+            id: 'dialog-overlay',
             position: 'absolute',
             top: 0,
             left: 0,
@@ -367,7 +383,7 @@ export class TerminalRenderer {
             alignItems: 'center',
             zIndex: 100
           },
-          this.createQtyDialog()
+          this.createTransactionDialog()
         )
       );
     }
@@ -628,10 +644,14 @@ export class TerminalRenderer {
     // Table header (fixed, outside scroll area)
     const headerRow = this.createTableHeader();
     
-    // Create scrollable stock rows with zebra striping
-    const stockRows = stocks.map((stock, index) => 
-      this.createStockRow(stock, index + 1, index % 2 === 0, index === this.selectedIndex)
-    );
+    // Create scrollable stock rows with zebra striping and purchase panels
+    const rows: any[] = [];
+    stocks.forEach((stock, index) => {
+      rows.push(this.createStockRow(stock, index + 1, index % 2 === 0, index === this.selectedIndex));
+      if (this.expandedSymbols.has(stock.symbol)) {
+        rows.push(this.createPurchaseHistoryPanel(stock.symbol));
+      }
+    });
 
     // Create scrollable container for stock rows
     const scrollableContent = ScrollBox(
@@ -643,7 +663,7 @@ export class TerminalRenderer {
         scrollX: false,
         viewportCulling: true // Performance optimization for large lists
       },
-      ...stockRows
+      ...rows
     );
 
     return Box(
@@ -671,15 +691,15 @@ export class TerminalRenderer {
         flexDirection: 'row',
         padding: 1
       },
-      Text({ content: '#', width: 3, fg: '#FFFFFF' }),
-      Text({ content: 'Symbol', width: 12, fg: '#FFFFFF' }),
-      Text({ content: 'Name', width: 20, fg: '#FFFFFF' }),
+      Text({ content: '#', width: 2, fg: '#FFFFFF' }),
+      Text({ content: 'Symbol', width: 10, fg: '#FFFFFF' }),
       Text({ content: 'Price', width: 10, fg: '#FFFFFF' }),
-      Text({ content: 'Change', width: 8, fg: '#FFFFFF' }),
-      Text({ content: '%Change', width: 8, fg: '#FFFFFF' }),
-      Text({ content: 'Volume', width: 10, fg: '#FFFFFF' }),
-      Text({ content: 'Qty', width: 8, fg: '#FFFFFF' }),
-      Text({ content: 'Actions', width: 15, fg: '#AAAAFF' })
+      Text({ content: 'Change', width: 7, fg: '#FFFFFF' }),
+      Text({ content: 'Qty', width: 5, fg: '#FFFFFF' }),
+      Text({ content: 'Cost', width: 9, fg: '#FFFFFF' }),
+      Text({ content: 'Value', width: 10, fg: '#FFFFFF' }),
+      Text({ content: 'P&L', width: 11, fg: '#FFFFFF' }),
+      Text({ content: 'Actions', width: 18, fg: '#AAAAFF' })
     );
   }
 
@@ -687,38 +707,44 @@ export class TerminalRenderer {
    * Create individual stock row with zebra striping and selection support
    */
   private createStockRow(stock: Stock, index: number, isEvenRow: boolean = false, isSelected: boolean = false) {
-    // Truncate name if too long
-    const truncatedName = stock.name.length > 18 ? 
-      stock.name.substring(0, 18) + '..' : stock.name;
-    
     const changeColor = stock.isPositive ? '#00FF00' : '#FF0000';
     
-    // Determine background color based on selection state
     let backgroundColor: string;
     if (isSelected) {
-      backgroundColor = '#0055AA'; // Blue background for selected row
+      backgroundColor = '#0055AA';
     } else {
-      backgroundColor = isEvenRow ? '#2a2a2a' : '#1a1a1a'; // Zebra striping
+      backgroundColor = isEvenRow ? '#2a2a2a' : '#1a1a1a';
     }
     
-    // Brighter symbol color when selected
     const symbolColor = isSelected ? '#00FFFF' : '#00BFFF';
-    const qty = this.stockQuantities.get(stock.symbol);
+    const pos = this.calculatePositionSummary(stock.symbol, stock.price.amount);
     
-    // Create action buttons (only visible when selected)
-    const moveUpButton = this.createActionButton('🔼', '#00FF00', () => this.handleMoveUp(index - 1), isSelected, !qty || qty === 0 ? 4: 2);
-    const moveDownButton = this.createActionButton('🔽', '#FFFF00', () => this.handleMoveDown(index - 1), isSelected);
-    const deleteButton = this.createActionButton('❌', '#FF0000', () => this.handleDelete(index - 1), isSelected);
+    const hasPosition = pos.qty > 0;
+    const currencySymbol = stock.price.currency === 'EUR' ? '€' : stock.price.currency;
     
-    // Spacer between buttons
-    const buttonSpacer = Box(
-      {
-        width: 1,
-        height: 1,
-        backgroundColor: 'transparent',
-      },
-      Text({ content: ' ', width: 1 })
-    );
+    const qtyText = hasPosition ? pos.qty.toString() : '-';
+    const costText = hasPosition ? `${currencySymbol}${pos.totalCost.toFixed(0)}` : '-';
+    const valueText = hasPosition ? `${currencySymbol}${pos.currentValue.toFixed(0)}` : '-';
+    const plColor = pos.pl >= 0 ? '#00FF00' : '#FF0000';
+    const plSign = pos.pl >= 0 ? '+' : '';
+    const plText = hasPosition ? `${plSign}${currencySymbol}${pos.pl.toFixed(0)}` : '-';
+    const plPctText = hasPosition ? `${plSign}${pos.plPercent.toFixed(1)}%` : '';
+
+    const buyBtn = this.createActionButton('📈', '#00FF88', () => this.openBuyDialog(stock.symbol), isSelected, 0);
+    const sellBtn = this.createActionButton('📉', '#FF8888', () => this.openSellDialog(stock.symbol), !hasPosition || !isSelected ? false : true, 1);
+    const deleteBtn = this.createActionButton('❌', '#FF0000', () => this.handleDelete(index - 1), isSelected, 1);
+    
+    const isExpanded = this.expandedSymbols.has(stock.symbol);
+    const detailsBtn = this.createActionButton('📋', isExpanded ? '#00FFFF' : '#888888', () => {
+      if (isExpanded) {
+        this.expandedSymbols.delete(stock.symbol);
+      } else {
+        this.expandedSymbols.add(stock.symbol);
+      }
+      this.renderWithCurrentStatus();
+    }, isSelected && hasPosition, 1);
+    
+    const buttonSpacer = Box({ width: 1, height: 1, backgroundColor: 'transparent' }, Text({ content: ' ', width: 1 }));
 
     return Box(
       {
@@ -732,172 +758,97 @@ export class TerminalRenderer {
         backgroundColor,
         focusable: true,
         onMouseDown: (event) => {
-          if (this.editingSymbol !== null) return; // dialog is open, ignore row clicks
+          if (this.dialogMode !== 'none') return;
           if (event.button === 0) {
             this.handleRowClick(stock, index - 1);
           }
         }
       },
-      Text({ content: index.toString(), width: 3, fg: '#CCCCCC' }),
-      Text({ content: stock.symbol, width: 12, fg: symbolColor }),
-      Text({ content: truncatedName, width: 20, fg: '#FFFFFF' }),
-      Text({ content: stock.price.toString(), width: 10, fg: '#FFFFFF' }),
-      Text({ content: stock.formattedPriceChange, width: 8, fg: changeColor }),
-      Text({ content: stock.formattedPercentageChange, width: 8, fg: changeColor }),
-      Text({ content: stock.formattedVolume, width: 6, fg: '#CCCCCC' }),
-      this.createQtySection(stock.symbol, isSelected),
+      Text({ content: index.toString(), width: 2, fg: '#CCCCCC' }),
+      Text({ content: stock.symbol, width: 10, fg: symbolColor }),
+      Text({ content: stock.price.amount.toFixed(2), width: 10, fg: '#FFFFFF' }),
+      Text({ content: stock.formattedPriceChange, width: 7, fg: changeColor }),
+      Text({ content: qtyText, width: 5, fg: hasPosition ? '#FFFFFF' : '#666666' }),
+      Text({ content: costText, width: 9, fg: hasPosition ? '#888888' : '#666666' }),
+      Text({ content: valueText, width: 10, fg: hasPosition ? '#FFFFFF' : '#666666' }),
+      Text({ content: plText, width: 7, fg: hasPosition ? plColor : '#666666' }),
+      Text({ content: plPctText, width: 4, fg: hasPosition ? plColor : '#666666' }),
       buttonSpacer,
-      moveUpButton,
+      buyBtn,
       buttonSpacer,
-      moveDownButton,
+      sellBtn,
       buttonSpacer,
-      deleteButton
+      detailsBtn,
+      buttonSpacer,
+      deleteBtn
     );
   }
 
-  /**
-   * Qty display + edit button for a stock row (display-only; editing via dialog).
-   */
-  private createQtySection(symbol: string, isSelected: boolean): any {
-    const qty = this.stockQuantities.get(symbol);
-    const qtyText = qty !== undefined ? `x${qty}`.padStart(6) : '      ';
-
-    const editBtn = this.createActionButton('✏️', '#AAAAFF', () => {
-        this.editingSymbol = symbol;
-        this.editingInputValue = qty !== undefined ? qty.toString() : '';
-        this.renderWithCurrentStatus();
-      },
-      isSelected
-    );
-
-    if (qty && qty > 0) {
-      
+  private createPurchaseHistoryPanel(symbol: string): any {
+    const position = this.getPosition(symbol);
+    if (!position || !this.expandedSymbols.has(symbol)) {
+      return null;
     }
 
-    return Box(
-      { width: 8, height: 1, flexDirection: 'row', alignItems:'center', marginLeft: qty && qty > 0 ? 2 : 0 },
-      Text({ content: qtyText, width: 6, fg: '#AAAAFF' }),
-      editBtn,
-      Box({ width: 1, height: 1 }, Text({ content: ' ', width: 1 }))
-    );
-  }
-
-  private createQtyDialog(): any {
-    if (!this.editingSymbol) return null;
-
-    const symbol = this.editingSymbol;
     const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
-    const currentQty = this.stockQuantities.get(symbol);
-    const initialValue = currentQty !== undefined ? currentQty.toString() : '';
+    const currencySymbol = stock?.price.currency === 'EUR' ? '€' : (stock?.price.currency || '$');
+    const purchasesWithPL = calculatePurchasesWithPL(position.purchases, stock?.price.amount || 0);
 
-    const input = Input({ width: 12, maxLength: 8, placeholder: '0', value: initialValue });
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-    input.on(InputRenderableEvents.INPUT, (value: string) => {
-      this.editingInputValue = value;
-    });
-
-    setTimeout(() => {
-      input.focus();
-      if (initialValue) input.gotoLineEnd();
-    }, 0);
-
-    const confirmAndClose = () => {
-      const qty = parseInt(this.editingInputValue, 10);
-      if (!Number.isNaN(qty) && qty >= 0) {
-        if (qty === 0) {
-          this.stockQuantities.delete(symbol);
-        } else {
-          this.stockQuantities.set(symbol, qty);
-        }
+    const formatDate = (dateStr: string) => {
+      const parts = dateStr.split('-');
+      if (parts.length === 3) {
+        const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+        return `${monthNames[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
       }
-      this.editingSymbol = null;
-      this.editingInputValue = '';
-      this.renderWithCurrentStatus();
+      return dateStr;
     };
 
-    input.on(InputRenderableEvents.ENTER, confirmAndClose);
+    const purchaseRows = purchasesWithPL.map((p) => {
+      const plColor = p.pl >= 0 ? '#00FF00' : '#FF0000';
+      const plSign = p.pl >= 0 ? '+' : '';
+      return Box(
+        {
+          width: '100%',
+          flexDirection: 'row',
+          paddingLeft: 2
+        },
+        Text({ content: formatDate(p.date), width: 14, fg: '#AAAAAA' }),
+        Text({ content: `${currencySymbol}${p.pricePerShare.toFixed(2)}`, width: 10, fg: '#888888' }),
+        Text({ content: String(p.qty), width: 5, fg: '#FFFFFF' }),
+        Text({ content: `${plSign}${currencySymbol}${p.pl.toFixed(2)}`, width: 10, fg: plColor }),
+        Text({ content: `${plSign}${p.plPercent.toFixed(2)}%`, width: 8, fg: plColor }),
+        Text({ content: `${currencySymbol}${p.currentValue.toFixed(2)}`, width: 12, fg: '#FFFFFF' })
+      );
+    });
 
-    const priceStr = stock ? `  ${stock.price.toString()}` : '';
-
-    const okBtn = Box(
+    const headerRow = Box(
       {
-        width: 8, height: 1, backgroundColor: '#004400',
-        onMouseDown: (e: any) => { e.stopPropagation(); confirmAndClose(); }
+        width: '100%',
+        flexDirection: 'row',
+        backgroundColor: '#1a1a1a',
+        paddingLeft: 2
       },
-      Text({ content: '  [OK]  ', width: 8, fg: '#00FF00' })
+      Text({ content: 'Date', width: 14, fg: '#666666' }),
+      Text({ content: 'Price', width: 10, fg: '#666666' }),
+      Text({ content: 'Qty', width: 5, fg: '#666666' }),
+      Text({ content: 'Gain', width: 10, fg: '#666666' }),
+      Text({ content: '%', width: 8, fg: '#666666' }),
+      Text({ content: 'Value', width: 12, fg: '#666666' })
     );
-
-    const cancelBtn = Box(
-      {
-        width: 10, height: 1, backgroundColor: '#440000',
-        onMouseDown: (e: any) => {
-          e.stopPropagation();
-          this.editingSymbol = null;
-          this.editingInputValue = '';
-          this.renderWithCurrentStatus();
-        }
-      },
-      Text({ content: ' [Cancel] ', width: 10, fg: '#FF4444' })
-    );
-
-    return Box(
-      {
-        id: 'qty-dialog',
-        width: 52,
-        flexDirection: 'column',
-        borderStyle: 'double',
-        borderColor: '#AAAAFF',
-        backgroundColor: '#08081a',
-        padding: 1,
-        zIndex: 100
-      },
-      Text({ content: `Set quantity — ${symbol}${priceStr}`, fg: '#AAAAFF' }),
-      Box(
-        { width: '100%', flexDirection: 'row', alignItems: 'center', marginTop: 1, gap: 1 },
-        Text({ content: 'Shares: ', width: 8, fg: '#888888' }),
-        input,
-        okBtn,
-        cancelBtn
-      )
-    );
-  }
-
-  /**
-   * Portfolio value summary bar — shown only when any quantities are set.
-   */
-  private createPortfolioSummary(): any {
-    if (this.stockQuantities.size === 0 || !this.marketData) return null;
-
-    let total = 0;
-    let currency = 'EUR';
-    let positionsCount = 0;
-
-    for (const stock of this.marketData.stocks) {
-      const qty = this.stockQuantities.get(stock.symbol);
-      if (qty !== undefined && qty > 0) {
-        total += qty * stock.price.amount;
-        currency = stock.price.currency;
-        positionsCount++;
-      }
-    }
-
-    if (positionsCount === 0) return null;
-
-    const currencySymbol = currency === 'EUR' ? '€' : currency;
-    const totalStr = `${currencySymbol}${total.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
     return Box(
       {
         width: '100%',
-        height: 1,
-        flexDirection: 'row',
-        justifyContent: 'flex-end',
-        alignItems: 'center',
-        padding: 1,
-        backgroundColor: '#111122'
+        flexDirection: 'column',
+        borderStyle: 'single',
+        borderColor: '#444444',
+        backgroundColor: '#0a0a0a',
+        padding: 0
       },
-      Text({ content: `Portfolio (${positionsCount} position${positionsCount > 1 ? 's' : ''}):  `, fg: '#888888' }),
-      Text({ content: totalStr, fg: '#00FF88' })
+      headerRow,
+      ...purchaseRows
     );
   }
 
@@ -974,5 +925,356 @@ export class TerminalRenderer {
       
       console.log('🧹 Renderer cleaned up');
     }
+  }
+
+  // ========== Portfolio Management ==========
+
+  loadPortfolio(): Position[] {
+    this.positions = this.portfolioStore.load();
+    console.log(`📂 Loaded ${this.positions.length} positions from portfolio`);
+    return this.positions;
+  }
+
+  private savePortfolio(): void {
+    this.portfolioStore.save(this.positions);
+  }
+
+  getPosition(symbol: string): Position | undefined {
+    return this.positions.find(p => p.symbol === symbol);
+  }
+
+  getPositions(): Position[] {
+    return this.positions;
+  }
+
+  getSavedSymbols(): { symbol: string; name: string }[] {
+    return this.positions.map(p => ({ symbol: p.symbol, name: p.name }));
+  }
+
+  // ========== Position Calculations ==========
+
+  private calculatePositionSummary(symbol: string, currentPrice: number) {
+    const position = this.getPosition(symbol);
+    if (!position || position.purchases.length === 0) {
+      return { qty: 0, totalCost: 0, currentValue: 0, pl: 0, plPercent: 0 };
+    }
+    const summary = calculatePositionSummary(position.purchases, currentPrice);
+    return summary;
+  }
+
+  // ========== Dialog Methods ==========
+
+  private scheduleDateChangeFetch(): void {
+    if (this.dialogFetchTimer) {
+      clearTimeout(this.dialogFetchTimer);
+    }
+    this.dialogFetchTimer = setTimeout(() => {
+      this.fetchHistoricalPrice();
+    }, 1000);
+  }
+
+  private incrementDay(): void {
+    const daysInMonth = new Date(this.dialogYear, this.dialogMonth + 1, 0).getDate();
+    this.dialogDay++;
+    if (this.dialogDay > daysInMonth) {
+      this.dialogDay = 1;
+      this.incrementMonth();
+    }
+    this.scheduleDateChangeFetch();
+  }
+
+  private decrementDay(): void {
+    const daysInPrevMonth = new Date(this.dialogYear, this.dialogMonth, 0).getDate();
+    this.dialogDay--;
+    if (this.dialogDay < 1) {
+      this.dialogDay = daysInPrevMonth;
+      this.decrementMonth();
+    }
+    this.scheduleDateChangeFetch();
+  }
+
+  private incrementMonth(): void {
+    this.dialogMonth++;
+    if (this.dialogMonth > 11) {
+      this.dialogMonth = 0;
+      this.dialogYear++;
+    }
+    const daysInMonth = new Date(this.dialogYear, this.dialogMonth + 1, 0).getDate();
+    if (this.dialogDay > daysInMonth) {
+      this.dialogDay = daysInMonth;
+    }
+    this.scheduleDateChangeFetch();
+  }
+
+  private decrementMonth(): void {
+    this.dialogMonth--;
+    if (this.dialogMonth < 0) {
+      this.dialogMonth = 11;
+      this.dialogYear--;
+    }
+    const daysInMonth = new Date(this.dialogYear, this.dialogMonth + 1, 0).getDate();
+    if (this.dialogDay > daysInMonth) {
+      this.dialogDay = daysInMonth;
+    }
+    this.scheduleDateChangeFetch();
+  }
+
+  private incrementYear(): void {
+    this.dialogYear++;
+    const daysInMonth = new Date(this.dialogYear, this.dialogMonth + 1, 0).getDate();
+    if (this.dialogDay > daysInMonth) {
+      this.dialogDay = daysInMonth;
+    }
+    this.scheduleDateChangeFetch();
+  }
+
+  private decrementYear(): void {
+    this.dialogYear--;
+    const daysInMonth = new Date(this.dialogYear, this.dialogMonth + 1, 0).getDate();
+    if (this.dialogDay > daysInMonth) {
+      this.dialogDay = daysInMonth;
+    }
+    this.scheduleDateChangeFetch();
+  }
+
+  openBuyDialog(symbol: string): void {
+    this.dialogMode = 'buy';
+    this.dialogSymbol = symbol;
+    this.dialogYear = new Date().getFullYear();
+    this.dialogMonth = new Date().getMonth();
+    this.dialogDay = new Date().getDate();
+    this.dialogQty = '';
+    
+    const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
+    this.dialogPrice = stock ? stock.price.amount.toFixed(2) : '';
+    this.dialogUseDayPrice = false;
+    this.dialogFetchingPrice = false;
+    
+    this.renderWithCurrentStatus();
+  }
+
+  openSellDialog(symbol: string): void {
+    this.dialogMode = 'sell';
+    this.dialogSymbol = symbol;
+    this.dialogYear = new Date().getFullYear();
+    this.dialogMonth = new Date().getMonth();
+    this.dialogDay = new Date().getDate();
+    this.dialogQty = '';
+    
+    const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
+    this.dialogPrice = stock ? stock.price.amount.toFixed(2) : '';
+    this.dialogUseDayPrice = false;
+    this.dialogFetchingPrice = false;
+    
+    this.renderWithCurrentStatus();
+  }
+
+  closeDialog(): void {
+    this.dialogMode = 'none';
+    this.dialogSymbol = '';
+    this.renderWithCurrentStatus();
+  }
+
+  private generateId(): string {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2);
+  }
+
+  async confirmBuy(): Promise<void> {
+    const qty = parseInt(this.dialogQty, 10);
+    const price = parseFloat(this.dialogPrice);
+
+    if (isNaN(qty) || qty <= 0) {
+      return;
+    }
+    if (isNaN(price) || price <= 0) {
+      return;
+    }
+
+    const stock = this.marketData?.stocks.find(s => s.symbol === this.dialogSymbol);
+    const name = stock?.name || this.dialogSymbol;
+    const dateStr = `${this.dialogYear}-${String(this.dialogMonth + 1).padStart(2, '0')}-${String(this.dialogDay).padStart(2, '0')}`;
+
+    const purchase: Purchase = {
+      id: this.generateId(),
+      date: dateStr,
+      qty,
+      pricePerShare: price
+    };
+
+    this.positions = this.portfolioStore.addPurchase(this.dialogSymbol, name, purchase, this.positions);
+    this.savePortfolio();
+    this.closeDialog();
+  }
+
+  async confirmSell(): Promise<void> {
+    const qty = parseInt(this.dialogQty, 10);
+    const price = parseFloat(this.dialogPrice);
+
+    if (isNaN(qty) || qty <= 0) {
+      return;
+    }
+    if (isNaN(price) || price <= 0) {
+      return;
+    }
+
+    const position = this.getPosition(this.dialogSymbol);
+    if (!position) {
+      return;
+    }
+
+    const totalQty = position.purchases.reduce((sum, p) => sum + p.qty, 0);
+    if (totalQty < qty) {
+      return;
+    }
+
+    let remainingToSell = qty;
+    const newPurchases = [...position.purchases];
+    
+    while (remainingToSell > 0 && newPurchases.length > 0) {
+      const oldest = newPurchases[0];
+      if (oldest.qty <= remainingToSell) {
+        remainingToSell -= oldest.qty;
+        newPurchases.shift();
+      } else {
+        newPurchases[0] = { ...oldest, qty: oldest.qty - remainingToSell };
+        remainingToSell = 0;
+      }
+    }
+
+    if (newPurchases.length === 0) {
+      this.positions = this.positions.filter(p => p.symbol !== this.dialogSymbol);
+    } else {
+      const idx = this.positions.findIndex(p => p.symbol === this.dialogSymbol);
+      if (idx >= 0) {
+        this.positions[idx] = { ...position, purchases: newPurchases };
+      }
+    }
+
+    this.savePortfolio();
+    this.closeDialog();
+  }
+
+  async fetchHistoricalPrice(): Promise<void> {
+    if (!this.dialogSymbol || this.dialogFetchingPrice) return;
+
+    const dateStr = `${this.dialogYear}-${String(this.dialogMonth + 1).padStart(2, '0')}-${String(this.dialogDay).padStart(2, '0')}`;
+
+    this.dialogFetchingPrice = true;
+    this.renderWithCurrentStatus();
+
+    const price = await this.historicalPriceService.getPriceOnDate(this.dialogSymbol, dateStr);
+
+    this.dialogFetchingPrice = false;
+    if (price !== null) {
+      this.dialogPrice = price.toFixed(2);
+    }
+    this.renderWithCurrentStatus();
+  }
+
+  private createTransactionDialog(): any {
+    if (this.dialogMode === 'none') return null;
+
+    const isBuy = this.dialogMode === 'buy';
+    const symbol = this.dialogSymbol;
+    const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
+    const title = isBuy ? `BUY: ${symbol}` : `SELL: ${symbol}`;
+    const titleColor = isBuy ? '#00FF88' : '#FF6666';
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const loading = this.dialogFetchingPrice;
+
+    const qtyInput = Input({ width: 10, maxLength: 8, placeholder: '0', value: this.dialogQty });
+    qtyInput.on(InputRenderableEvents.INPUT, (value: string) => { this.dialogQty = value; });
+    if (!loading) setTimeout(() => { qtyInput.focus(); }, 0);
+
+    const priceInput = Input({ width: 12, maxLength: 10, placeholder: '0.00', value: this.dialogPrice });
+    priceInput.on(InputRenderableEvents.INPUT, (value: string) => { this.dialogPrice = value; });
+
+    const okBtnBg = loading ? '#333333' : '#004400';
+    const okBtnFg = loading ? '#666666' : '#00FF00';
+    const okBtnText = loading ? ' Loading... ' : '  [OK]  ';
+
+    const arrowBtn = (label: string, onClick: () => void, disabled: boolean) => {
+      const bg = disabled ? '#333333' : '#222244';
+      const fg = disabled ? '#444444' : '#00AAFF';
+      return Box(
+        {
+          width: label.includes(']') ? 2 : 2,
+          height: 1,
+          backgroundColor: bg,
+          onMouseDown: disabled ? undefined : ((e: any) => { e.stopPropagation(); onClick(); this.renderWithCurrentStatus(); })
+        },
+        Text({ content: label, width: 2, fg })
+      );
+    };
+
+    const shortMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    return Box(
+      {
+        id: 'transaction-dialog',
+        width: 55,
+        flexDirection: 'column',
+        borderStyle: 'double',
+        borderColor: titleColor,
+        backgroundColor: '#08081a',
+        padding: 1,
+        zIndex: 100
+      },
+      Text({ content: title, fg: titleColor }),
+      Box({ width: '100%', height: 1 }),
+
+      Box(
+        { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 0 },
+        Text({ content: 'Date: ', width: 6, fg: '#888888' }),
+        arrowBtn('<', () => this.decrementMonth(), loading),
+        Text({ content: shortMonths[this.dialogMonth], width: 4, fg: '#FFFFFF' }),
+        arrowBtn('>', () => this.incrementMonth(), loading),
+        Box({ width: 2 }),
+        arrowBtn('<', () => this.decrementDay(), loading),
+        Text({ content: String(this.dialogDay).padStart(2, '0'), width: 3, fg: '#FFFFFF' }),
+        arrowBtn('>', () => this.incrementDay(), loading),
+        Box({ width: 2 }),
+        arrowBtn('<', () => this.decrementYear(), loading),
+        Text({ content: String(this.dialogYear), width: 5, fg: '#FFFFFF' }),
+        arrowBtn('>', () => this.incrementYear(), loading)
+      ),
+      Box({ width: '100%', height: 1 }),
+
+      Box(
+        { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 1 },
+        Text({ content: 'Qty: ', width: 5, fg: '#888888' }),
+        qtyInput
+      ),
+      Box({ width: '100%', height: 1 }),
+
+      Box(
+        { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 1 },
+        Text({ content: 'Price: ', width: 6, fg: '#888888' }),
+        priceInput
+      ),
+      Box({ width: '100%', height: 1 }),
+
+      Box(
+        { flexDirection: 'row', gap: 10 },
+        Box(
+          {
+            width: 9,
+            height: 1,
+            backgroundColor: '#440000',
+            onMouseDown: (e: any) => { e.stopPropagation(); this.closeDialog(); }
+          },
+          Text({ content: ' [Cancel] ', width: 9, fg: '#FF4444' })
+        ),
+        Box(
+          {
+            width: 9,
+            height: 1,
+            backgroundColor: okBtnBg,
+            onMouseDown: loading ? undefined : ((e: any) => { e.stopPropagation(); isBuy ? this.confirmBuy() : this.confirmSell(); })
+          },
+          Text({ content: okBtnText, width: 9, fg: okBtnFg })
+        )
+      )
+    );
   }
 }

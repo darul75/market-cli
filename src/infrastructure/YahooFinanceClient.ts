@@ -195,6 +195,62 @@ export class YahooFinanceClient {
   }
 
   /**
+   * Fetch historical closing price for a specific date
+   */
+  public async fetchHistoricalPrice(symbol: string, date: string): Promise<number | null> {
+    try {
+      const targetDate = new Date(date);
+      const period1 = Math.floor(targetDate.getTime() / 1000);
+      const period2 = period1 + 86400 * 7;
+
+      const url = `${this.baseUrl}/v8/finance/chart/${symbol}`;
+
+      const response: AxiosResponse = await axios.get(url, {
+        timeout: this.timeout,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        params: {
+          period1,
+          period2,
+          interval: '1d',
+          includePrePost: false,
+          events: 'div,splits'
+        }
+      });
+
+      const chartData = response.data?.chart?.result?.[0];
+      if (!chartData) {
+        return null;
+      }
+
+      const timestamps = chartData.timestamp as number[] | undefined;
+      const closes = chartData.indicators?.quote?.[0]?.close as number[] | undefined;
+
+      if (!timestamps || !closes) {
+        return null;
+      }
+
+      const targetTimestamp = Math.floor(targetDate.getTime() / 1000);
+      let closestPrice: number | null = null;
+      let closestDiff = Infinity;
+
+      for (let i = 0; i < timestamps.length; i++) {
+        const diff = Math.abs(timestamps[i] - targetTimestamp);
+        if (diff < closestDiff && closes[i] !== null) {
+          closestDiff = diff;
+          closestPrice = closes[i];
+        }
+      }
+
+      return closestPrice;
+    } catch (error) {
+      console.warn(`⚠️ Failed to fetch historical price for ${symbol} on ${date}:`, error);
+      return null;
+    }
+  }
+
+  /**
    * Fetch data for a single stock using Yahoo Finance v8 chart endpoint
    */
   private async fetchSingleStockInternal(symbol: string): Promise<StockData | null> {

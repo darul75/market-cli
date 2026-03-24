@@ -3,6 +3,7 @@ export { Price } from './Price.js';
 export { Stock } from './Stock.js';
 export { MarketData } from './MarketData.js';
 export type { SearchResult } from './SearchResult.js';
+export type { Position, Purchase, PurchaseWithPL, PositionSummary } from './Position.js';
 
 // Domain types
 export interface StockData {

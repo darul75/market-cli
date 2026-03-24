@@ -24,6 +24,9 @@ async function main(): Promise<void> {
     console.log('🎨 Initializing terminal interface...');
     await renderer.initialize();
     
+    // Load saved portfolio
+    renderer.loadPortfolio();
+    
     // Set up search service
     const currentApp = app;
     renderer.setupSearchService(
@@ -69,7 +72,7 @@ async function main(): Promise<void> {
     
     // Subscribe to reactive streams and update UI
     combineLatest([marketData$, status$]).subscribe({
-      next: ([marketData, status]) => {
+      next: async ([marketData, status]) => {
         try {
           if (status.isLoading && !marketData) {
             // Progress will be handled by the progress tracker listener
@@ -83,6 +86,15 @@ async function main(): Promise<void> {
           } else if (marketData && !status.hasError) {
             // Show actual data
             progressTracker.removeListener(progressListener);
+            
+            // Add saved stocks to app if not already present
+            const savedSymbols = renderer!.getSavedSymbols();
+            for (const { symbol, name } of savedSymbols) {
+              if (!marketData.stocks.find(s => s.symbol === symbol)) {
+                await currentApp.addStock(symbol, name);
+              }
+            }
+            
             renderer!.renderStockTable(marketData, status);
           }
         } catch (renderError) {
