@@ -37,7 +37,8 @@ export class SearchPanel {
     searchService: SearchService,
     onAddStock: (symbol: string, name: string) => void,
     private onClose: () => void,
-    private onRequestRerender: () => void
+    private onRequestRerender: () => void,
+    private onMouseOver: () => void,
   ) {
     debugLog('SearchPanel initialized');
     this.searchService = searchService;
@@ -196,8 +197,8 @@ export class SearchPanel {
       borderColor: '#666666',
       backgroundColor: '#000000',
       paddingLeft: 1,
-      paddingRight: 1
-
+      paddingRight: 1,
+      onMouseOver: this.onMouseOver
     },
       // Title bar
       Box({

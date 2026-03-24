@@ -1,4 +1,4 @@
-import { createCliRenderer, Box, Text, CliRenderer, ScrollBox, Input, InputRenderableEvents } from '@opentui/core';
+import { createCliRenderer, Box, Text, CliRenderer, ScrollBox, Input, InputRenderableEvents, KeyEvent } from '@opentui/core';
 import { Stock, MarketData, Position, Transaction } from '../domain/index.js';
 import { calculatePositionSummary, calculateTransactionsWithPL } from '../domain/PositionCalculator.js';
 import { AppStatus, SearchService } from '../application/index.js';
@@ -74,7 +74,8 @@ export class TerminalRenderer {
 
   // Expanded purchase history panels
   private expandedSymbols: Set<string> = new Set();
-
+  // Search active
+  private searchActive: boolean = false;
 
   /**
    * Initialize the renderer
@@ -88,14 +89,50 @@ export class TerminalRenderer {
         autoFocus: true, // Focus nearest focusable on left click
         enableMouseMovement: true // Enable hover tracking
       });
+
+      // Use keyInput EventEmitter to capture keyboard events
+      (this.renderer as any).keyInput?.on('keypress', (key: any) => {
+        debugLog('Key press: ' + key.name);
+        if (key.name === 'escape' && this.dialogMode !== 'none') {
+          this.closeDialog();
+        }
+
+        // 'b' opens buy dialog
+        if (!this.searchActive && key.name === 'b' && this.selectedSymbol && this.dialogMode === 'none') {
+          const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
+          if (stock) {
+            this.openBuyDialog(this.selectedSymbol);
+          } else {
+            // Clear stale selection
+            this.selectedSymbol = '';
+            this.selectedIndex = -1;
+          }
+        }
+        
+        // 's' opens sell dialog
+        if (!this.searchActive && key.name === 's' && this.selectedSymbol && this.dialogMode === 'none') {
+          const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
+          if (stock) {
+            const pos = this.calculatePositionSummary(this.selectedSymbol, 0);
+            if (pos.qty > 0) {
+              this.openSellDialog(this.selectedSymbol);
+            }
+          } else {
+            // Clear stale selection
+            this.selectedSymbol = '';
+            this.selectedIndex = -1;
+          }
+        }
+      });
+
       this.isInitialized = true;
       
       // Set up resize event handling
       this.setupResizeHandling();
       
-      console.log('✅ OpenTUI renderer initialized successfully');
+      debugLog('✅ OpenTUI renderer initialized successfully');
     } catch (error) {
-      console.error('❌ Failed to initialize OpenTUI renderer:', error);
+      debugLog('❌ Failed to initialize OpenTUI renderer: ' + error);
       throw error;
     }
   }
@@ -356,7 +393,8 @@ export class TerminalRenderer {
       searchService,
       onAddStock,
       () => {}, // Close callback
-      () => this.renderWithCurrentStatus()
+      () => this.renderWithCurrentStatus(),
+      () => {this.searchActive = true}
     );
     
     debugLog('Search panel created successfully');
@@ -828,7 +866,10 @@ export class TerminalRenderer {
             alignItems: 'center',
             justifyContent: 'center',
             paddingTop: 2,
-            paddingBottom: 2
+            paddingBottom: 2,
+            onMouseOver: () => {
+              this.searchActive = false;
+            }
           },
           Text({
             content: '📊 No stocks in portfolio',
@@ -854,7 +895,10 @@ export class TerminalRenderer {
         minHeight: 3, // Minimum 3 rows for small terminals
         scrollY: true,
         scrollX: false,
-        viewportCulling: true // Performance optimization for large lists
+        viewportCulling: true, // Performance optimization for large lists
+        onMouseOver: () => {
+          this.searchActive = false;
+        }
       },
       ...rows
     );
