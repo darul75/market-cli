@@ -31,10 +31,12 @@ async function main(): Promise<void> {
     
     // Set up search service
     const currentApp = app;
+    const currentRenderer = renderer;
     renderer.setupSearchService(
       currentApp.getSearchService(),
       async (symbol: string, name: string) => {
         console.log(`\n✅ Adding ${symbol} (${name}) to watchlist...`);
+        currentRenderer.addSymbol(symbol, name);
         await currentApp.addStock(symbol, name);
       }
     );
@@ -62,12 +64,8 @@ async function main(): Promise<void> {
     
     progressTracker.addListener(progressListener);
     
-    // Show initial loading state (or empty state if no symbols)
-    if (symbols.length === 0) {
-      renderer.renderEmptyState();
-    } else {
-      renderer.renderLoading();
-    }
+    // Show initial loading state
+    renderer.renderLoading();
     
     // Start the application with saved symbols
     console.log('📊 Starting data streams...');
@@ -83,13 +81,6 @@ async function main(): Promise<void> {
     combineLatest([marketData$, status$]).subscribe({
       next: async ([marketData, status]) => {
         try {
-          if (symbols.length === 0) {
-            // Show empty state when no stocks
-            progressTracker.removeListener(progressListener);
-            renderer!.renderEmptyState();
-            return;
-          }
-          
           if (status.isLoading && !marketData) {
             // Progress will be handled by the progress tracker listener
             if (!currentProgress) {
@@ -99,8 +90,8 @@ async function main(): Promise<void> {
             // Show error state - no fallback data rendering
             progressTracker.removeListener(progressListener);
             renderer!.renderError(status.error);
-          } else if (marketData && !status.hasError) {
-            // Show actual data
+          } else if (marketData) {
+            // Show actual data (handles empty portfolio too)
             progressTracker.removeListener(progressListener);
             renderer!.renderStockTable(marketData, status);
           }

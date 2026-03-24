@@ -144,6 +144,16 @@ export class StockDataStream {
     this.isStarted = true;
     this.retryCount = 0;
     this.initialLoadComplete = false;
+
+    if (this.apiClient.symbols.length === 0) {
+      console.log('📭 No symbols configured, emitting empty market data');
+      const { Stock } = require('../domain/index.js');
+      const emptyMarketData = new (require('../domain/index.js').MarketData)([], new Date(), true, '');
+      this.marketDataSubject.next(emptyMarketData);
+      this.loadingSubject.next(false);
+      this.connectionStatusSubject.next(true);
+      return this.marketData$;
+    }
     
     // Test connection first, but don't let it block the main data stream
     this.testConnection().catch(error => {

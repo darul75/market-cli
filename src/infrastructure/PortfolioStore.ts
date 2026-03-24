@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { Position, Purchase } from '../domain/Position.js';
+import { Position, Transaction } from '../domain/Position.js';
 
 export interface PortfolioData {
   positions: Position[];
@@ -52,32 +52,32 @@ export class PortfolioStore {
     return positions.find(p => p.symbol === symbol);
   }
 
-  addPurchase(symbol: string, name: string, purchase: Purchase, positions: Position[]): Position[] {
+  addTransaction(symbol: string, name: string, transaction: Transaction, positions: Position[]): Position[] {
     const index = positions.findIndex(p => p.symbol === symbol);
     
     if (index >= 0) {
       const updated = [...positions];
       updated[index] = {
         ...updated[index],
-        purchases: [...updated[index].purchases, purchase]
+        transactions: [...updated[index].transactions, transaction]
       };
       return updated;
     }
     
-    return [...positions, { symbol, name, purchases: [purchase] }];
+    return [...positions, { symbol, name, transactions: [transaction] }];
   }
 
-  removePurchase(symbol: string, purchaseId: string, positions: Position[]): Position[] {
+  removeTransaction(symbol: string, transactionId: string, positions: Position[]): Position[] {
     const index = positions.findIndex(p => p.symbol === symbol);
     if (index < 0) return positions;
 
     const updated = [...positions];
     updated[index] = {
       ...updated[index],
-      purchases: updated[index].purchases.filter(p => p.id !== purchaseId)
+      transactions: updated[index].transactions.filter(t => t.id !== transactionId)
     };
 
-    if (updated[index].purchases.length === 0) {
+    if (updated[index].transactions.length === 0) {
       return updated.filter(p => p.symbol !== symbol);
     }
 
@@ -104,7 +104,7 @@ export class PortfolioStore {
       if (typeof pos !== 'object' || pos === null) return false;
       const p = pos as Record<string, unknown>;
       if (typeof p.symbol !== 'string') return false;
-      if (!Array.isArray(p.purchases)) return false;
+      if (!Array.isArray(p.transactions)) return false;
     }
     return true;
   }

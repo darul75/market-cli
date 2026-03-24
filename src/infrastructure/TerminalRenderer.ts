@@ -1,6 +1,6 @@
 import { createCliRenderer, Box, Text, CliRenderer, ScrollBox, Input, InputRenderableEvents } from '@opentui/core';
-import { Stock, MarketData, Position, Purchase } from '../domain/index.js';
-import { calculatePositionSummary, calculatePurchasesWithPL } from '../domain/PositionCalculator.js';
+import { Stock, MarketData, Position, Transaction } from '../domain/index.js';
+import { calculatePositionSummary, calculateTransactionsWithPL } from '../domain/PositionCalculator.js';
 import { AppStatus, SearchService } from '../application/index.js';
 import { SearchPanel } from './search/index.js';
 import { PortfolioStore } from './PortfolioStore.js';
@@ -12,6 +12,10 @@ function debugLog(msg: string): void {
     fs2.appendFileSync('/tmp/market-cli-debug.log', `[${new Date().toISOString()}] TerminalRenderer: ${msg}\n`);
   } catch {}
 }
+
+const HEADER_WIDTH_QUANTITY = 10;
+const HEADER_WIDTH_INVESTED = 12;
+const HEADER_WIDTH_VALUE = 12;
 
 /**
  * Interface for loading progress information
@@ -698,12 +702,34 @@ export class TerminalRenderer {
     
     // Create scrollable stock rows with zebra striping and purchase panels
     const rows: any[] = [];
-    stocks.forEach((stock, index) => {
-      rows.push(this.createStockRow(stock, index + 1, index % 2 === 0, index === this.selectedIndex));
-      if (this.expandedSymbols.has(stock.symbol)) {
-        rows.push(this.createPurchaseHistoryPanel(stock.symbol));
-      }
-    });
+    
+    // Show empty state message inside the table
+    if (stocks.length === 0) {
+      rows.push(
+        Box(
+          {
+            width: '100%',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingTop: 2,
+            paddingBottom: 2
+          },
+          Text({
+            content: '📊 No stocks in portfolio',
+            fg: '#00FFFF',
+            width: 30
+          })
+        )
+      );
+    } else {
+      stocks.forEach((stock, index) => {
+        rows.push(this.createStockRow(stock, index + 1, index % 2 === 0, index === this.selectedIndex));
+        if (this.expandedSymbols.has(stock.symbol)) {
+          rows.push(this.createPurchaseHistoryPanel(stock.symbol));
+        }
+      });
+    }
 
     // Create scrollable container for stock rows
     const scrollableContent = ScrollBox(
@@ -743,15 +769,16 @@ export class TerminalRenderer {
         flexDirection: 'row',
         padding: 1
       },
-      Text({ content: '#', width: 3, fg: '#FFFFFF' }),
+      Text({ content: '#', width: 2, fg: '#FFFFFF' }),
       Text({ content: 'Symbol', width: 10, fg: '#FFFFFF' }),
       Text({ content: 'Price', width: 10, fg: '#FFFFFF' }),
-      Text({ content: 'Change', width: 10, fg: '#FFFFFF' }),
-      Text({ content: 'Qty', width: 7, fg: '#FFFFFF' }),
-      Text({ content: 'Cost', width: 9, fg: '#FFFFFF' }),
-      Text({ content: 'Value', width: 10, fg: '#FFFFFF' }),
-      Text({ content: 'P&L', width: 15, fg: '#FFFFFF' }),
-      Text({ content: 'Actions', width: 18, fg: '#AAAAFF' })
+      Text({ content: 'Change', width: 8, fg: '#FFFFFF' }),
+      Text({ content: 'Qty', width: HEADER_WIDTH_QUANTITY, fg: '#FFFFFF' }),
+      Text({ content: 'Invested', width: HEADER_WIDTH_INVESTED, fg: '#FFFFFF' }),
+      Text({ content: 'Value', width: HEADER_WIDTH_VALUE, fg: '#FFFFFF' }),
+      Text({ content: 'Unreal.', width: HEADER_WIDTH_VALUE, fg: '#FFFFFF' }),
+      Text({ content: 'Real.', width: HEADER_WIDTH_VALUE, fg: '#FFFFFF' }),
+      Text({ content: 'Actions', width: 15, fg: '#FFFFFF' })
     );
   }
 
@@ -769,21 +796,27 @@ export class TerminalRenderer {
     }
     
     const symbolColor = isSelected ? '#00FFFF' : '#00BFFF';
+    const position = this.getPosition(stock.symbol);
     const pos = this.calculatePositionSummary(stock.symbol, stock.price.amount);
     
     const hasPosition = pos.qty > 0;
+    const hasTransactions = position && position.transactions.length > 0;
     const currencySymbol = stock.price.currency === 'EUR' ? '€' : stock.price.currency;
 
     const moveUpButton = this.createActionButton('🔼', '#00FF00', () => this.handleMoveUp(index - 1), isSelected, !pos.qty || pos.qty === 0 ? 4: 2);
     const moveDownButton = this.createActionButton('🔽', '#FFFF00', () => this.handleMoveDown(index - 1), isSelected);    
 
     const qtyText = hasPosition ? pos.qty.toString() : '-';
-    const costText = hasPosition ? `${currencySymbol}${pos.totalCost.toFixed(0)}` : '-';
+    const investedText = hasTransactions ? `${currencySymbol}${pos.totalInvested.toFixed(0)}` : '-';
     const valueText = hasPosition ? `${currencySymbol}${pos.currentValue.toFixed(0)}` : '-';
-    const plColor = pos.pl >= 0 ? '#00FF00' : '#FF0000';
-    const plSign = pos.pl >= 0 ? '+' : '';
-    const plText = hasPosition ? `${plSign}${currencySymbol}${pos.pl.toFixed(0)}` : '-';
-    const plPctText = hasPosition ? `${plSign}${pos.plPercent.toFixed(1)}%` : '';
+    
+    const unrealColor = pos.unrealizedPL >= 0 ? '#00FF00' : '#FF0000';
+    const unrealSign = pos.unrealizedPL >= 0 ? '+' : '';
+    const unrealText = hasTransactions ? `${unrealSign}${currencySymbol}${pos.unrealizedPL.toFixed(0)}` : '-';
+    
+    const realColor = pos.realizedPL >= 0 ? '#00FF00' : '#FF0000';
+    const realSign = pos.realizedPL >= 0 ? '+' : '';
+    const realText = hasTransactions ? `${realSign}${currencySymbol}${pos.realizedPL.toFixed(0)}` : '-';
 
     const buyBtn = this.createActionButton('📈', '#00FF88', () => this.openBuyDialog(stock.symbol), isSelected, 0);
     const sellBtn = this.createActionButton('📉', '#FF8888', () => this.openSellDialog(stock.symbol), !hasPosition || !isSelected ? false : true, 1);
@@ -797,7 +830,7 @@ export class TerminalRenderer {
         this.expandedSymbols.add(stock.symbol);
       }
       this.renderWithCurrentStatus();
-    }, isSelected && hasPosition, 1);
+    }, isSelected && hasTransactions, 1);
     
     const buttonSpacer = Box({ width: 1, height: 1, backgroundColor: 'transparent' }, Text({ content: ' ', width: 1 }));
 
@@ -819,15 +852,15 @@ export class TerminalRenderer {
           }
         }
       },
-      Text({ content: index.toString(), width: 3, fg: '#CCCCCC' }),
+      Text({ content: index.toString(), width: 2, fg: '#CCCCCC' }),
       Text({ content: stock.symbol, width: 10, fg: symbolColor }),
       Text({ content: stock.price.amount.toFixed(2), width: 10, fg: '#FFFFFF' }),
-      Text({ content: stock.formattedPriceChange, width: 10, fg: changeColor }),
-      Text({ content: qtyText, width: 7, fg: hasPosition ? '#FFFFFF' : '#666666' }),
-      Text({ content: costText, width: 9, fg: hasPosition ? '#888888' : '#666666' }),
-      Text({ content: valueText, width: 10, fg: hasPosition ? '#FFFFFF' : '#666666' }),
-      Text({ content: plText, width: 7, fg: hasPosition ? plColor : '#666666' }),
-      Text({ content: plPctText, width: 8, fg: hasPosition ? plColor : '#666666' }),
+      Text({ content: stock.formattedPriceChange, width: 8, fg: changeColor }),
+      Text({ content: qtyText, width: HEADER_WIDTH_QUANTITY, fg: hasPosition ? '#FFFFFF' : '#666666' }),
+      Text({ content: investedText, width: HEADER_WIDTH_INVESTED, fg: hasTransactions ? '#888888' : '#666666' }),
+      Text({ content: valueText, width: HEADER_WIDTH_VALUE, fg: hasPosition ? '#FFFFFF' : '#666666' }),
+      Text({ content: unrealText, width: HEADER_WIDTH_VALUE, fg: hasPosition ? unrealColor : '#666666' }),
+      Text({ content: realText, width: HEADER_WIDTH_VALUE, fg: hasTransactions && pos.realizedPL !== 0 ? realColor : '#666666' }),
       buttonSpacer,
       buyBtn,
       buttonSpacer,
@@ -835,11 +868,7 @@ export class TerminalRenderer {
       buttonSpacer,
       detailsBtn,
       buttonSpacer,
-      deleteBtn,
-      buttonSpacer,
-      moveUpButton,
-      buttonSpacer,
-      moveDownButton
+      deleteBtn
     );
   }
 
@@ -851,7 +880,7 @@ export class TerminalRenderer {
 
     const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
     const currencySymbol = stock?.price.currency === 'EUR' ? '€' : (stock?.price.currency || '$');
-    const purchasesWithPL = calculatePurchasesWithPL(position.purchases, stock?.price.amount || 0);
+    const transactionsWithPL = calculateTransactionsWithPL(position.transactions, stock?.price.amount || 0);
 
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -864,21 +893,24 @@ export class TerminalRenderer {
       return dateStr;
     };
 
-    const purchaseRows = purchasesWithPL.map((p) => {
-      const plColor = p.pl >= 0 ? '#00FF00' : '#FF0000';
-      const plSign = p.pl >= 0 ? '+' : '';
+    const transactionRows = transactionsWithPL.map((t) => {
+      const plColor = t.pl >= 0 ? '#00FF00' : '#FF0000';
+      const plSign = t.pl >= 0 ? '+' : '';
+      const typeColor = t.type === 'BUY' ? '#00FF00' : '#FF8888';
+      const typeLabel = t.type === 'BUY' ? 'BUY' : 'SELL';
       return Box(
         {
           width: '100%',
           flexDirection: 'row',
           paddingLeft: 2
         },
-        Text({ content: formatDate(p.date), width: 14, fg: '#AAAAAA' }),
-        Text({ content: `${currencySymbol}${p.pricePerShare.toFixed(2)}`, width: 10, fg: '#888888' }),
-        Text({ content: String(p.qty), width: 5, fg: '#FFFFFF' }),
-        Text({ content: `${plSign}${currencySymbol}${p.pl.toFixed(2)}`, width: 10, fg: plColor }),
-        Text({ content: `${plSign}${p.plPercent.toFixed(2)}%`, width: 8, fg: plColor }),
-        Text({ content: `${currencySymbol}${p.currentValue.toFixed(2)}`, width: 12, fg: '#FFFFFF' })
+        Text({ content: formatDate(t.date), width: 14, fg: '#AAAAAA' }),
+        Text({ content: typeLabel, width: 7, fg: typeColor }),
+        Text({ content: `${currencySymbol}${t.pricePerShare.toFixed(2)}`, width: 12, fg: '#888888' }),
+        Text({ content: String(t.qty), width: 10, fg: '#FFFFFF' }),
+        Text({ content: `${plSign}${currencySymbol}${t.pl.toFixed(0)}`, width: 12, fg: plColor }),
+        Text({ content: `${plSign}${t.plPercent.toFixed(2)}%`, width: 8, fg: plColor }),
+        Text({ content: `${currencySymbol}${t.currentValue.toFixed(0)}`, width: 12, fg: '#FFFFFF' })
       );
     });
 
@@ -890,9 +922,10 @@ export class TerminalRenderer {
         paddingLeft: 2
       },
       Text({ content: 'Date', width: 14, fg: '#666666' }),
-      Text({ content: 'Price', width: 10, fg: '#666666' }),
-      Text({ content: 'Qty', width: 5, fg: '#666666' }),
-      Text({ content: 'Gain', width: 10, fg: '#666666' }),
+      Text({ content: 'Type', width: 7, fg: '#666666' }),
+      Text({ content: 'Price', width: 12, fg: '#666666' }),
+      Text({ content: 'Qty', width: 10, fg: '#666666' }),
+      Text({ content: 'Gain', width: 12, fg: '#666666' }),
       Text({ content: '%', width: 8, fg: '#666666' }),
       Text({ content: 'Value', width: 12, fg: '#666666' })
     );
@@ -907,7 +940,7 @@ export class TerminalRenderer {
         padding: 0
       },
       headerRow,
-      ...purchaseRows
+      ...transactionRows
     );
   }
 
@@ -1010,14 +1043,23 @@ export class TerminalRenderer {
     return this.positions.map(p => ({ symbol: p.symbol, name: p.name }));
   }
 
+  addSymbol(symbol: string, name: string): void {
+    const existing = this.positions.find(p => p.symbol === symbol);
+    if (!existing) {
+      this.positions = [...this.positions, { symbol, name, transactions: [] }];
+      this.savePortfolio();
+      console.log(`💾 Added ${symbol} to portfolio`);
+    }
+  }
+
   // ========== Position Calculations ==========
 
   private calculatePositionSummary(symbol: string, currentPrice: number) {
     const position = this.getPosition(symbol);
-    if (!position || position.purchases.length === 0) {
-      return { qty: 0, totalCost: 0, currentValue: 0, pl: 0, plPercent: 0 };
+    if (!position || position.transactions.length === 0) {
+      return { qty: 0, totalInvested: 0, avgCost: 0, currentValue: 0, unrealizedPL: 0, unrealizedPLPercent: 0, realizedPL: 0 };
     }
-    const summary = calculatePositionSummary(position.purchases, currentPrice);
+    const summary = calculatePositionSummary(position.transactions, currentPrice);
     return summary;
   }
 
@@ -1153,14 +1195,15 @@ export class TerminalRenderer {
     const name = stock?.name || this.dialogSymbol;
     const dateStr = `${this.dialogYear}-${String(this.dialogMonth + 1).padStart(2, '0')}-${String(this.dialogDay).padStart(2, '0')}`;
 
-    const purchase: Purchase = {
+    const transaction: Transaction = {
       id: this.generateId(),
+      type: 'BUY',
       date: dateStr,
       qty,
       pricePerShare: price
     };
 
-    this.positions = this.portfolioStore.addPurchase(this.dialogSymbol, name, purchase, this.positions);
+    this.positions = this.portfolioStore.addTransaction(this.dialogSymbol, name, transaction, this.positions);
     this.savePortfolio();
     this.closeDialog();
   }
@@ -1181,34 +1224,32 @@ export class TerminalRenderer {
       return;
     }
 
-    const totalQty = position.purchases.reduce((sum, p) => sum + p.qty, 0);
-    if (totalQty < qty) {
+    // Calculate current holdings (BUY - SELL)
+    const totalBuys = position.transactions
+      .filter(t => t.type === 'BUY')
+      .reduce((sum, t) => sum + t.qty, 0);
+    const totalSells = position.transactions
+      .filter(t => t.type === 'SELL')
+      .reduce((sum, t) => sum + t.qty, 0);
+    const currentQty = totalBuys - totalSells;
+
+    if (currentQty < qty) {
       return;
     }
 
-    let remainingToSell = qty;
-    const newPurchases = [...position.purchases];
-    
-    while (remainingToSell > 0 && newPurchases.length > 0) {
-      const oldest = newPurchases[0];
-      if (oldest.qty <= remainingToSell) {
-        remainingToSell -= oldest.qty;
-        newPurchases.shift();
-      } else {
-        newPurchases[0] = { ...oldest, qty: oldest.qty - remainingToSell };
-        remainingToSell = 0;
-      }
-    }
+    const stock = this.marketData?.stocks.find(s => s.symbol === this.dialogSymbol);
+    const name = stock?.name || this.dialogSymbol;
+    const dateStr = `${this.dialogYear}-${String(this.dialogMonth + 1).padStart(2, '0')}-${String(this.dialogDay).padStart(2, '0')}`;
 
-    if (newPurchases.length === 0) {
-      this.positions = this.positions.filter(p => p.symbol !== this.dialogSymbol);
-    } else {
-      const idx = this.positions.findIndex(p => p.symbol === this.dialogSymbol);
-      if (idx >= 0) {
-        this.positions[idx] = { ...position, purchases: newPurchases };
-      }
-    }
+    const transaction: Transaction = {
+      id: this.generateId(),
+      type: 'SELL',
+      date: dateStr,
+      qty,
+      pricePerShare: price
+    };
 
+    this.positions = this.portfolioStore.addTransaction(this.dialogSymbol, name, transaction, this.positions);
     this.savePortfolio();
     this.closeDialog();
   }

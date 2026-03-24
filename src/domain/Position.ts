@@ -1,11 +1,14 @@
-export interface Purchase {
+export type TransactionType = 'BUY' | 'SELL';
+
+export interface Transaction {
   id: string;
+  type: TransactionType;
   date: string;           // YYYY-MM-DD
   qty: number;
   pricePerShare: number;
 }
 
-export interface PurchaseWithPL extends Purchase {
+export interface TransactionWithPL extends Transaction {
   totalCost: number;
   currentValue: number;
   pl: number;
@@ -15,13 +18,15 @@ export interface PurchaseWithPL extends Purchase {
 export interface Position {
   symbol: string;
   name: string;
-  purchases: Purchase[];
+  transactions: Transaction[];
 }
 
 export interface PositionSummary {
-  totalQty: number;
-  totalCost: number;
+  qty: number;
+  totalInvested: number;
+  avgCost: number;
   currentValue: number;
-  totalPL: number;
-  totalPLPercent: number;
+  unrealizedPL: number;
+  unrealizedPLPercent: number;
+  realizedPL: number;
 }

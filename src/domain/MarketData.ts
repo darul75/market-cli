@@ -9,11 +9,7 @@ export class MarketData {
     public readonly lastUpdate: Date,
     public readonly isLive: boolean = true,
     public readonly indexName: string = ''
-  ) {
-    if (stocks.length === 0) {
-      throw new Error('MarketData must contain at least one stock');
-    }
-  }
+  ) {}
 
   /**
    * Find a stock by symbol
@@ -51,6 +47,7 @@ export class MarketData {
    * Get average percentage change across all stocks
    */
   get averageChange(): number {
+    if (this.stocks.length === 0) return 0;
     const totalChange = this.stocks.reduce(
       (sum, stock) => sum + stock.priceChangePercentage, 
       0
