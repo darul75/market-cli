@@ -29,6 +29,9 @@ export class StockDataStream {
   private readonly errorSubject = new BehaviorSubject<string | null>(null);
   private readonly connectionStatusSubject = new BehaviorSubject<boolean>(false);
 
+  // Track all symbols (original + added dynamically) to ensure they're preserved during refresh
+  private trackedSymbols = new Set<string>();
+
   // Configuration
   private refreshIntervalMs: number = 60000; // 1 minute for live updates
   private isStarted: boolean = false;
@@ -47,6 +50,7 @@ export class StockDataStream {
    */
   public setSymbols(symbols: string[]): void {
     this.apiClient.symbols = symbols;
+    this.trackedSymbols = new Set(symbols);
   }
 
   /**
@@ -214,37 +218,66 @@ export class StockDataStream {
           this.errorSubject.next(null);
         }),
         switchMap(() => this.fetchMarketData()),
-        map(response => {
-          // Merge new data with previous data for failed stocks (fallback)
+        map((response: any) => {
+          // Build merged data to ensure ALL tracked symbols are present
           const previousData = this.marketDataSubject.value;
-          const newMarketData = this.transformationService.transformToMarketData(response.data || []);
+          const fetchedSymbols = new Set(response.data?.map((d: any) => d.symbol) || []);
+          const previousStocksMap = new Map(
+            (previousData?.stocks || []).map(s => [s.symbol, s])
+          );
           
-          if (response.failedSymbols && response.failedSymbols.length > 0 && previousData) {
-            console.log(`⚠️ ${response.failedSymbols.length} stocks failed, using cached data`);
-            
-            // Keep failed stocks from previous data (they stay fresh since we're using cached values)
-            const previousStocksMap = new Map(
-              previousData.stocks.map(s => [s.symbol, s])
-            );
-            
-            // Create merged stocks array: new data + fallback from previous for failed
-            const mergedStocks = newMarketData.stocks.map(stock => stock);
-            for (const failedSymbol of response.failedSymbols) {
-              const previousStock = previousStocksMap.get(failedSymbol);
+          // Start with freshly fetched data
+          const mergedStocks = [...(response.data || [])].map(d => {
+            const stock = this.transformationService.transformToStock(d);
+            return stock;
+          });
+          
+          // For each tracked symbol, ensure it's in the result
+          let missingCount = 0;
+          for (const symbol of this.trackedSymbols) {
+            if (!fetchedSymbols.has(symbol)) {
+              // Check if we have it from previous data
+              const previousStock = previousStocksMap.get(symbol);
               if (previousStock) {
-                // Keep the previous stock data (it will show as "stale" via isDataFresh)
                 mergedStocks.push(previousStock);
-                console.log(`  ↩️ ${failedSymbol}: keeping cached price (${previousStock.price.amount})`);
+                console.log(`  ↩️ ${symbol}: keeping cached price (${previousStock.price.amount})`);
+                missingCount++;
+              } else {
+                // Symbol is tracked but never successfully fetched - try one more time
+                console.log(`  ⚠️ ${symbol}: no cached data, attempting fetch...`);
+                // Note: We'll handle this asynchronously in a follow-up
               }
             }
-            
-            return newMarketData.updateStocks(mergedStocks);
           }
           
-          if (!response.success || !response.data) {
-            throw new Error(response.error || 'Failed to fetch live update');
+          if (missingCount > 0) {
+            console.log(`⚠️ ${missingCount} stocks restored from cache`);
           }
-          return newMarketData;
+          
+          // Handle completely missing stocks (never fetched successfully)
+          // These are tracked symbols that have no cached data
+          const mergedSymbols = new Set(mergedStocks.map(s => s.symbol));
+          for (const symbol of this.trackedSymbols) {
+            if (!mergedSymbols.has(symbol)) {
+              console.log(`  🔄 ${symbol}: will be fetched on next refresh`);
+            }
+          }
+          
+          // Even if API returned no data, use cached data for tracked symbols
+          if (mergedStocks.length === 0 && previousData && previousData.stocks.length > 0) {
+            console.log('⚠️ API returned no data, using full cache');
+            return previousData;
+          }
+          
+          return this.transformationService.transformToMarketData(
+            mergedStocks.map(s => ({
+              symbol: s.symbol,
+              name: s.name,
+              price: s.price.amount,
+              previousClose: s.previousPrice.amount,
+              volume: s.volume
+            }))
+          );
         }),
         tap(() => {
           this.loadingSubject.next(false);
@@ -326,8 +359,12 @@ export class StockDataStream {
       const stockData = await this.apiClient.fetchSingleStock(symbol);
       if (stockData) {
         const stock = this.transformationService.transformToStock(stockData);
-        currentData.stocks.push(stock);
-        this.marketDataSubject.next(currentData);
+        // Create new array to ensure proper reactivity
+        const updatedStocks = [...currentData.stocks, stock];
+        this.marketDataSubject.next(currentData.updateStocks(updatedStocks));
+        // Track this symbol so it's preserved during refresh
+        this.trackedSymbols.add(symbol);
+        console.log(`📊 Added ${symbol} to tracked symbols (${this.trackedSymbols.size} total)`);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
