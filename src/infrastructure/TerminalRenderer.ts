@@ -13,9 +13,9 @@ function debugLog(msg: string): void {
   } catch {}
 }
 
-const HEADER_WIDTH_QUANTITY = 10;
-const HEADER_WIDTH_INVESTED = 12;
-const HEADER_WIDTH_VALUE = 12;
+const HEADER_WIDTH_QUANTITY = 9;
+const HEADER_WIDTH_INVESTED = 11;
+const HEADER_WIDTH_VALUE = 11;
 
 /**
  * Interface for loading progress information
@@ -191,6 +191,16 @@ export class TerminalRenderer {
     if (this.marketData && this.currentStatus) {
       this.renderStockTable(this.marketData, this.currentStatus);
     }
+  }
+
+  /**
+   * Truncate a name string to fit in the column width
+   */
+  private truncateName(name: string, maxLength: number): string {
+    if (name.length <= maxLength) {
+      return name;
+    }
+    return name.substring(0, maxLength - 3) + '...';
   }
 
   /**
@@ -857,13 +867,14 @@ export class TerminalRenderer {
       },
       Text({ content: '#', width: 5, fg: '#FFFFFF' }),
       Text({ content: 'Symbol', width: 10, fg: '#FFFFFF' }),
+      Text({ content: 'Name', width: 20, fg: '#FFFFFF' }),
       Text({ content: 'Price', width: 10, fg: '#FFFFFF' }),
       Text({ content: 'Change', width: 8, fg: '#FFFFFF' }),
       Text({ content: 'Qty', width: HEADER_WIDTH_QUANTITY, fg: '#FFFFFF' }),
       Text({ content: 'Invested', width: HEADER_WIDTH_INVESTED, fg: '#FFFFFF' }),
       Text({ content: 'Value', width: HEADER_WIDTH_VALUE, fg: '#FFFFFF' }),
       Text({ content: 'Unreal.', width: HEADER_WIDTH_VALUE, fg: '#FFFFFF' }),
-      Text({ content: 'Real.', width: HEADER_WIDTH_VALUE, fg: '#FFFFFF' }),
+      Text({ content: 'Real.', width: 10, fg: '#FFFFFF' }),
       Text({ content: 'Actions', width: 15, fg: '#FFFFFF' })
     );
   }
@@ -940,13 +951,14 @@ export class TerminalRenderer {
       },
       Text({ content: index.toString(), width: 5, fg: '#CCCCCC' }),
       Text({ content: stock.symbol, width: 10, fg: symbolColor }),
+      Text({ content: this.truncateName(stock.name, 19), width: 20, fg: '#888888' }),
       Text({ content: stock.price.amount.toFixed(2), width: 10, fg: '#FFFFFF' }),
       Text({ content: stock.formattedPriceChange, width: 8, fg: changeColor }),
       Text({ content: qtyText, width: HEADER_WIDTH_QUANTITY, fg: hasPosition ? '#FFFFFF' : '#666666' }),
       Text({ content: investedText, width: HEADER_WIDTH_INVESTED, fg: hasTransactions ? '#888888' : '#666666' }),
       Text({ content: valueText, width: HEADER_WIDTH_VALUE, fg: hasPosition ? '#FFFFFF' : '#666666' }),
       Text({ content: unrealText, width: HEADER_WIDTH_VALUE, fg: hasPosition ? unrealColor : '#666666' }),
-      Text({ content: realText, width: HEADER_WIDTH_VALUE, fg: hasTransactions && pos.realizedPL !== 0 ? realColor : '#666666' }),
+      Text({ content: realText, width: 10, fg: hasTransactions && pos.realizedPL !== 0 ? realColor : '#666666' }),
       buttonSpacer,
       buyBtn,
       buttonSpacer,
