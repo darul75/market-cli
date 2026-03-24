@@ -388,7 +388,7 @@ export class TerminalRenderer {
     return Box(
       {
         id: 'portfolio-total',
-        width: 26,
+        width: 46,
         flexDirection: 'column',
         borderStyle: 'single',
         borderColor: '#666666',
@@ -415,7 +415,8 @@ export class TerminalRenderer {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          height: 1
+          height: 2,
+          marginTop: 1
         },
         Text({
           content: valueStr,
@@ -428,7 +429,7 @@ export class TerminalRenderer {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          height: 1
+          height: 2
         },
         Text({
           content: plStr,

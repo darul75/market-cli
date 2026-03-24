@@ -25,7 +25,7 @@ export class SearchResultsTable {
   private isSearching: boolean = false;
 
   private config: SearchTableConfig = {
-    maxHeight: 5,
+    maxHeight: 15,
     showHeader: true,
     enableSelection: true,
     enableMouseClicks: true
@@ -48,7 +48,8 @@ export class SearchResultsTable {
       width: '100%',
       flexDirection: 'column',
       marginTop: 1,
-      flexShrink: 0
+      flexShrink: 0,
+      height: 8
     },
       // Scrollable results container
       this.createScrollableResults()
@@ -65,7 +66,7 @@ private createScrollableResults(): any {
     {
       id: 'search-results-scroll',
       width: '100%',
-      height: this.config.maxHeight,
+      height: 3,
       scrollY: true,
       scrollX: false,
       viewportCulling: false,
@@ -78,7 +79,7 @@ private createScrollableResults(): any {
   /**
    * Create the default "No results yet" row
    */
-  private   createDefaultRow(): any {
+  private createDefaultRow(): any {
     debugLog('Creating default "No results yet" row');
 
     return Box({
@@ -107,7 +108,8 @@ private createScrollableResults(): any {
       height: 1,
       justifyContent: 'center',
       alignItems: 'center',
-      padding: 1,
+      paddingLeft: 1,
+      paddingRight: 1,
       backgroundColor: '#1a1a1a'
     },
       Text({ 

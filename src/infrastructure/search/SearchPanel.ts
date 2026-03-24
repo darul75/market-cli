@@ -207,7 +207,6 @@ export class SearchPanel {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 1
       },
         Text({
           content: '🔍 Search Stocks',
