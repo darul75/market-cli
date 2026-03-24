@@ -19,12 +19,20 @@ interface SearchPanelState {
   isSearching: boolean;
 }
 
+interface PortfolioTotal {
+  value: number;
+  invested: number;
+  pl: number;
+  plPercent: number;
+}
+
 export class SearchPanel {
   private searchInput: SearchInput;
   private resultsTable: SearchResultsTable;
   private searchService: SearchService;
   private subscription: Subscription | null = null;
   private panelContainer: any = null;
+  private getPortfolioTotal: (() => PortfolioTotal) | null = null;
 
   private state: SearchPanelState = {
     visible: true,
@@ -51,6 +59,10 @@ export class SearchPanel {
     this.resultsTable = new SearchResultsTable(onAddStock);
 
     this.setupSubscriptions();
+  }
+
+  setPortfolioTotalGetter(getter: () => PortfolioTotal): void {
+    this.getPortfolioTotal = getter;
   }
 
   /**
@@ -188,6 +200,35 @@ export class SearchPanel {
     // Create results table
     const tableComponent = this.resultsTable.createTable();
 
+    // Get portfolio total for footer
+    const footerElements: any[] = [];
+    if (this.getPortfolioTotal) {
+      const total = this.getPortfolioTotal();
+      const currencySymbol = '€';
+      const valueStr = `${currencySymbol}${total.value.toFixed(0)}`;
+      const plSign = total.pl >= 0 ? '+' : '';
+      const plColor = total.pl >= 0 ? '#00FF00' : '#FF0000';
+      const plStr = `${plSign}${currencySymbol}${total.pl.toFixed(0)} (${plSign}${total.plPercent.toFixed(1)}%)`;
+      
+      footerElements.push(
+        Box({
+          width: '100%',
+          flexDirection: 'row',
+          justifyContent: 'flex-end',
+          marginTop: 1
+        },
+          Text({
+            content: `Portfolio: ${valueStr}`,
+            fg: '#FFFFFF'
+          }),
+          Text({
+            content: `  ${plStr}`,
+            fg: plColor
+          })
+        )
+      );
+    }
+
     this.panelContainer = Box({
       id: 'search-panel',
       width: 76,
@@ -219,7 +260,10 @@ export class SearchPanel {
       inputComponent,
       
       // Results table  
-      tableComponent
+      tableComponent,
+      
+      // Footer with portfolio total
+      ...footerElements
     );
 
     return this.panelContainer;

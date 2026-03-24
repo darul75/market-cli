@@ -341,6 +341,9 @@ export class TerminalRenderer {
       () => this.renderWithCurrentStatus()
     );
     
+    // Set up portfolio total getter for footer display
+    this.searchPanel.setPortfolioTotalGetter(() => this.getPortfolioTotal());
+    
     debugLog('Search panel created successfully');
   }
 
@@ -1061,6 +1064,25 @@ export class TerminalRenderer {
     }
     const summary = calculatePositionSummary(position.transactions, currentPrice);
     return summary;
+  }
+
+  getPortfolioTotal(): { value: number; invested: number; pl: number; plPercent: number } {
+    let totalValue = 0;
+    let totalInvested = 0;
+    
+    for (const position of this.positions) {
+      const stock = this.marketData?.getStock(position.symbol);
+      const currentPrice = stock?.price.amount || 0;
+      const summary = this.calculatePositionSummary(position.symbol, currentPrice);
+      
+      totalValue += summary.currentValue;
+      totalInvested += summary.totalInvested;
+    }
+    
+    const pl = totalValue - totalInvested;
+    const plPercent = totalInvested > 0 ? (pl / totalInvested) * 100 : 0;
+    
+    return { value: totalValue, invested: totalInvested, pl, plPercent };
   }
 
   // ========== Dialog Methods ==========
