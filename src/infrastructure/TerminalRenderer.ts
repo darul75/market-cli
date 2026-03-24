@@ -855,7 +855,7 @@ export class TerminalRenderer {
         flexDirection: 'row',
         padding: 1
       },
-      Text({ content: '#', width: 2, fg: '#FFFFFF' }),
+      Text({ content: '#', width: 5, fg: '#FFFFFF' }),
       Text({ content: 'Symbol', width: 10, fg: '#FFFFFF' }),
       Text({ content: 'Price', width: 10, fg: '#FFFFFF' }),
       Text({ content: 'Change', width: 8, fg: '#FFFFFF' }),
@@ -938,7 +938,7 @@ export class TerminalRenderer {
           }
         }
       },
-      Text({ content: index.toString(), width: 2, fg: '#CCCCCC' }),
+      Text({ content: index.toString(), width: 5, fg: '#CCCCCC' }),
       Text({ content: stock.symbol, width: 10, fg: symbolColor }),
       Text({ content: stock.price.amount.toFixed(2), width: 10, fg: '#FFFFFF' }),
       Text({ content: stock.formattedPriceChange, width: 8, fg: changeColor }),

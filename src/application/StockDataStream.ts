@@ -215,10 +215,36 @@ export class StockDataStream {
         }),
         switchMap(() => this.fetchMarketData()),
         map(response => {
+          // Merge new data with previous data for failed stocks (fallback)
+          const previousData = this.marketDataSubject.value;
+          const newMarketData = this.transformationService.transformToMarketData(response.data || []);
+          
+          if (response.failedSymbols && response.failedSymbols.length > 0 && previousData) {
+            console.log(`⚠️ ${response.failedSymbols.length} stocks failed, using cached data`);
+            
+            // Keep failed stocks from previous data (they stay fresh since we're using cached values)
+            const previousStocksMap = new Map(
+              previousData.stocks.map(s => [s.symbol, s])
+            );
+            
+            // Create merged stocks array: new data + fallback from previous for failed
+            const mergedStocks = newMarketData.stocks.map(stock => stock);
+            for (const failedSymbol of response.failedSymbols) {
+              const previousStock = previousStocksMap.get(failedSymbol);
+              if (previousStock) {
+                // Keep the previous stock data (it will show as "stale" via isDataFresh)
+                mergedStocks.push(previousStock);
+                console.log(`  ↩️ ${failedSymbol}: keeping cached price (${previousStock.price.amount})`);
+              }
+            }
+            
+            return newMarketData.updateStocks(mergedStocks);
+          }
+          
           if (!response.success || !response.data) {
             throw new Error(response.error || 'Failed to fetch live update');
           }
-          return this.transformationService.transformToMarketData(response.data);
+          return newMarketData;
         }),
         tap(() => {
           this.loadingSubject.next(false);

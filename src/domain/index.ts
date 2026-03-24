@@ -20,6 +20,7 @@ export interface ApiResponse {
   data?: StockData[];
   error?: string;
   timestamp: string;
+  failedSymbols?: string[];
 }
 
 export type SortCriteria = 'symbol' | 'price' | 'change' | 'percentage' | 'volume';

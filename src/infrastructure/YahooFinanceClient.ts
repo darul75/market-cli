@@ -30,11 +30,13 @@ export class YahooFinanceClient {
 
   /**
    * Fetch stock data for configured symbols using v8/finance/chart endpoint with smart batching
+   * Returns both successful data and list of failed symbols for fallback handling
    */
-  async fetchStocks(): Promise<ApiResponse> {
+  async fetchStocks(): Promise<ApiResponse & { failedSymbols: string[] }> {
     try {
       const symbols = this.symbols;
       const stockData: StockData[] = [];
+      const failedSymbols: string[] = [];
 
       // Initialize progress tracking
       const batches = this.createBatches(symbols, this.batchSize);
@@ -59,6 +61,7 @@ export class YahooFinanceClient {
               stockData.push(data);
               progressTracker.addSuccess(symbol);
             } else {
+              failedSymbols.push(symbol);
               progressTracker.addError(symbol, 'No data returned from API');
             }
             
@@ -68,6 +71,7 @@ export class YahooFinanceClient {
             }
           } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            failedSymbols.push(symbol);
             progressTracker.addError(symbol, errorMessage);
             continue; // Skip failed stocks but continue with others
           }
@@ -79,22 +83,25 @@ export class YahooFinanceClient {
         }
       }
 
-      if (stockData.length === 0) {
+      if (stockData.length === 0 && failedSymbols.length === symbols.length) {
         throw new Error('No stock data could be fetched from Yahoo Finance API');
       }
 
       return {
-        success: true,
+        success: stockData.length > 0,
         data: stockData,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        failedSymbols,
+        error: failedSymbols.length > 0 ? `${failedSymbols.length} stocks failed to fetch` : undefined
       };
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       return {
         success: false,
         data: [],
-        error: `Yahoo Finance API Error: ${errorMessage}`,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        failedSymbols: [...this.symbols],
+        error: `Yahoo Finance API Error: ${errorMessage}`
       };
     }
   }
