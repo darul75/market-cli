@@ -62,7 +62,7 @@ jobs:
           merge-multiple: false
       
       - name: Generate checksums
-        run: sha256sum market-cli-* > SHA256SUMS.txt
+        run: find . -name "market-cli-*" -type f -exec sha256sum {} \; > SHA256SUMS.txt
       
       - name: Create Release
         uses: softprops/action-gh-release@v2
