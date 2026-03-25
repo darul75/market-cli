@@ -146,8 +146,18 @@ export class TerminalRenderer {
         }
 
         // 'h' opens help dialog
-        if (key.name === 'h' && this.dialogMode === 'none') {
+        if (!this.searchActive && key.name === 'h' && this.dialogMode === 'none') {
           this.openHelpDialog();
+        }
+
+        // Arrow keys for selection navigation
+        if (!this.searchActive && this.dialogMode === 'none') {
+          if (key.name === 'up') {
+            this.moveSelectionUp();
+          }
+          if (key.name === 'down') {
+            this.moveSelectionDown();
+          }
         }
       });
 
@@ -249,6 +259,40 @@ export class TerminalRenderer {
     }
     
     // Re-render with cached status (preserves timestamp)
+    this.renderWithCurrentStatus();
+  }
+
+  /**
+   * Move selection up (previous row)
+   */
+  private moveSelectionUp(): void {
+    const stockCount = this.marketData?.stocks.length || 0;
+    if (stockCount === 0) return;
+
+    if (this.selectedIndex <= 0) {
+      this.selectedIndex = stockCount - 1;
+    } else {
+      this.selectedIndex = this.selectedIndex - 1;
+    }
+    this.selectedSymbol = this.marketData!.stocks[this.selectedIndex].symbol;
+    this.renderWithCurrentStatus();
+  }
+
+  /**
+   * Move selection down (next row)
+   */
+  private moveSelectionDown(): void {
+    const stockCount = this.marketData?.stocks.length || 0;
+    if (stockCount === 0) return;
+
+    if (this.selectedIndex < 0) {
+      this.selectedIndex = 0;
+    } else if (this.selectedIndex >= stockCount - 1) {
+      this.selectedIndex = 0;
+    } else {
+      this.selectedIndex = this.selectedIndex + 1;
+    }
+    this.selectedSymbol = this.marketData!.stocks[this.selectedIndex].symbol;
     this.renderWithCurrentStatus();
   }
 
