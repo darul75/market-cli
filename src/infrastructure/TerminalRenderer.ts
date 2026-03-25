@@ -1,14 +1,14 @@
-import { createCliRenderer, Box, Text, CliRenderer, ScrollBox, Input, InputRenderableEvents, KeyEvent } from '@opentui/core';
-import { Stock, MarketData, Position, Transaction } from '../domain/index.js';
+import { createCliRenderer, Box, Text, type CliRenderer, ScrollBox, Input, InputRenderableEvents, KeyEvent } from '@opentui/core';
+import type { Stock, MarketData, Position, Transaction } from '../domain/index.js';
 import { calculatePositionSummary, calculateTransactionsWithPL } from '../domain/PositionCalculator.js';
-import { AppStatus, SearchService } from '../application/index.js';
+import type { AppStatus, SearchService } from '../application/index.js';
 import { SearchPanel } from './search/index.js';
 import { PortfolioStore } from './PortfolioStore.js';
 import { HistoricalPriceService } from './HistoricalPriceService.js';
-import { PortfolioHistoryService, PortfolioHistorySummary } from './PortfolioHistoryService.js';
+import { PortfolioHistoryService, type PortfolioHistorySummary } from './PortfolioHistoryService.js';
 import { AsciiChart } from './AsciiChart.js';
 
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.2.1';
 
 function debugLog(msg: string): void {
   try {
@@ -486,7 +486,8 @@ export class TerminalRenderer {
       onAddStock,
       () => {}, // Close callback
       () => this.renderWithCurrentStatus(),
-      () => {this.searchActive = true}
+      () => {this.searchActive = true},
+      () => this.clearSelection()
     );
     
     debugLog('Search panel created successfully');

@@ -39,6 +39,7 @@ export class SearchPanel {
     private onClose: () => void,
     private onRequestRerender: () => void,
     private onMouseOver: () => void,
+    private onTyping: () => void,
   ) {
     debugLog('SearchPanel initialized');
     this.searchService = searchService;
@@ -46,7 +47,7 @@ export class SearchPanel {
     // Create search input component — callback keeps state.query in sync
     this.searchInput = new SearchInput(searchService, (value) => {
       this.state.query = value;
-    });
+    }, this.onTyping);
 
     // Create results table component (pass onAddStock callback)
     this.resultsTable = new SearchResultsTable(onAddStock);
