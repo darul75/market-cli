@@ -55,7 +55,7 @@ export class TerminalRenderer {
   private historicalPriceService: HistoricalPriceService = new HistoricalPriceService();
 
   // Dialog state
-  private dialogMode: 'none' | 'buy' | 'sell' | 'portfolioGraph' | 'delete' | 'help' = 'none';
+  private dialogMode: 'none' | 'buy' | 'sell' | 'portfolioGraph' | 'delete' | 'help' | 'deleteTransaction' = 'none';
   private dialogSymbol: string = '';
   private dialogYear: number = new Date().getFullYear();
   private dialogMonth: number = new Date().getMonth();
@@ -65,6 +65,8 @@ export class TerminalRenderer {
   private dialogMessage: string = '';
   private dialogFetchingPrice: boolean = false;
   private dialogFetchTimer?: NodeJS.Timeout;
+  private dialogTransactionSymbol: string = '';
+  private dialogTransactionId: string = '';
 
   // Portfolio graph state
   private portfolioHistoryService: PortfolioHistoryService = new PortfolioHistoryService();
@@ -74,6 +76,9 @@ export class TerminalRenderer {
 
   // Expanded purchase history panels
   private expandedSymbols: Set<string> = new Set();
+  // Selected transaction in expanded panel
+  private selectedTransactionId: string | null = null;
+  private expandedTransactionSymbol: string | null = null;
   // Search active
   private searchActive: boolean = false;
 
@@ -105,6 +110,9 @@ export class TerminalRenderer {
         }
         if (key.name === 'return' && this.dialogMode === 'delete') {
           this.confirmDelete();
+        }
+        if (key.name === 'return' && this.dialogMode === 'deleteTransaction') {
+          this.confirmDeleteTransaction();
         }
 
         // 'b' opens buy dialog
@@ -158,6 +166,11 @@ export class TerminalRenderer {
             this.expandedSymbols.add(this.selectedSymbol);
           }
           this.renderWithCurrentStatus();
+        }
+
+        // 'x' deletes selected transaction
+        if (!this.searchActive && key.name === 'x' && this.selectedTransactionId && this.dialogMode === 'none' && this.expandedTransactionSymbol) {
+          this.openDeleteTransactionDialog(this.expandedTransactionSymbol, this.selectedTransactionId);
         }
 
         // Arrow keys for selection navigation
@@ -638,6 +651,7 @@ export class TerminalRenderer {
             zIndex: 100
           },
           this.dialogMode === 'delete' ? this.createDeleteConfirmDialog() : 
+          this.dialogMode === 'deleteTransaction' ? this.createDeleteTransactionDialog() :
           this.dialogMode === 'help' ? this.createHelpDialog() :
           this.dialogMode === 'portfolioGraph' ? this.createPortfolioGraphDialog() : this.createTransactionDialog()
         )
@@ -1136,6 +1150,7 @@ export class TerminalRenderer {
     };
 
     const transactionRows = transactionsWithPL.map((t) => {
+      const isSelected = t.id === this.selectedTransactionId;
       const plColor = t.pl >= 0 ? '#00FF00' : '#FF0000';
       const plSign = t.pl >= 0 ? '+' : '';
       const typeColor = t.type === 'BUY' ? '#00FF00' : '#FF8888';
@@ -1144,7 +1159,14 @@ export class TerminalRenderer {
         {
           width: '100%',
           flexDirection: 'row',
-          paddingLeft: 2
+          paddingLeft: 2,
+          backgroundColor: isSelected ? '#553300' : 'transparent',
+          onMouseDown: (e: any) => {
+            e.stopPropagation();
+            this.selectedTransactionId = isSelected ? null : t.id;
+            this.expandedTransactionSymbol = symbol;
+            this.renderWithCurrentStatus();
+          }
         },
         Text({ content: formatDate(t.date), width: 14, fg: '#AAAAAA' }),
         Text({ content: typeLabel, width: 7, fg: typeColor }),
@@ -1152,7 +1174,17 @@ export class TerminalRenderer {
         Text({ content: String(t.qty), width: 10, fg: '#FFFFFF' }),
         Text({ content: `${plSign}${currencySymbol}${t.pl.toFixed(0)}`, width: 12, fg: plColor }),
         Text({ content: `${plSign}${t.plPercent.toFixed(2)}%`, width: 8, fg: plColor }),
-        Text({ content: `${currencySymbol}${t.currentValue.toFixed(0)}`, width: 12, fg: '#FFFFFF' })
+        Text({ content: `${currencySymbol}${t.currentValue.toFixed(0)}`, width: 12, fg: '#FFFFFF' }),
+        Box(
+          { 
+            width: 3,
+            onMouseDown: (e: any) => {
+              e.stopPropagation();
+              this.openDeleteTransactionDialog(symbol, t.id);
+            }
+          },
+          Text({ content: '❌', fg: isSelected ? '#FF4444' : '#444444' })
+        )
       );
     });
 
@@ -1169,7 +1201,8 @@ export class TerminalRenderer {
       Text({ content: 'Qty', width: 10, fg: '#666666' }),
       Text({ content: 'Gain', width: 12, fg: '#666666' }),
       Text({ content: '%', width: 8, fg: '#666666' }),
-      Text({ content: 'Value', width: 12, fg: '#666666' })
+      Text({ content: 'Value', width: 12, fg: '#666666' }),
+      Text({ content: '', width: 3, fg: '#666666' })
     );
 
     return Box(
@@ -1434,6 +1467,8 @@ export class TerminalRenderer {
     this.dialogMode = 'none';
     this.dialogSymbol = '';
     this.dialogMessage = '';
+    this.selectedTransactionId = null;
+    this.expandedTransactionSymbol = null;
     this.renderWithCurrentStatus();
   }
 
@@ -1497,6 +1532,69 @@ export class TerminalRenderer {
     }
   }
 
+  openDeleteTransactionDialog(symbol: string, transactionId: string): void {
+    this.dialogMode = 'deleteTransaction';
+    this.dialogTransactionSymbol = symbol;
+    this.dialogTransactionId = transactionId;
+    this.renderWithCurrentStatus();
+  }
+
+  createDeleteTransactionDialog(): any {
+    const symbol = this.dialogTransactionSymbol;
+
+    return Box(
+      {
+        id: 'delete-transaction-dialog',
+        width: 50,
+        flexDirection: 'column',
+        borderStyle: 'double',
+        borderColor: '#FF4444',
+        backgroundColor: '#08081a',
+        padding: 1,
+        zIndex: 100
+      },
+      Text({ content: '⚠️  DELETE TRANSACTION', fg: '#FF4444', width: 50 }),
+      Box({ width: '100%', height: 1 }),
+      Text({ content: `Remove this transaction from ${symbol}?`, fg: '#FFFFFF', width: 50 }),
+      Box({ width: '100%', height: 1 }),
+      Box(
+        { width: 50, flexDirection: 'row', justifyContent: 'center', gap: 3 },
+        Box(
+          {
+            width: 10,
+            height: 1,
+            backgroundColor: '#440000',
+            onMouseDown: (e: any) => { e.stopPropagation(); this.confirmDeleteTransaction(); }
+          },
+          Text({ content: ' [Enter] ', fg: '#FF4444', width: 10 })
+        ),
+        Box(
+          {
+            width: 10,
+            height: 1,
+            backgroundColor: '#004400',
+            onMouseDown: (e: any) => { e.stopPropagation(); this.closeDialog(); }
+          },
+          Text({ content: ' [Esc]  ', fg: '#44FF44', width: 10 })
+        )
+      )
+    );
+  }
+
+  confirmDeleteTransaction(): void {
+    if (this.dialogTransactionSymbol && this.dialogTransactionId) {
+      this.positions = this.portfolioStore.removeTransaction(
+        this.dialogTransactionSymbol, 
+        this.dialogTransactionId, 
+        this.positions
+      );
+      this.savePortfolio();
+      this.selectedTransactionId = null;
+      this.expandedTransactionSymbol = null;
+    }
+    this.closeDialog();
+  }
+
   openHelpDialog(): void {
     this.dialogMode = 'help';
     this.renderWithCurrentStatus();
@@ -1509,6 +1607,7 @@ export class TerminalRenderer {
       { key: 's', action: 'Sell dialog (stock selected)' },
       { key: 'd', action: 'Delete confirmation (stock selected)' },
       { key: 'o', action: 'Toggle transaction history (stock selected)' },
+      { key: 'x', action: 'Delete selected transaction' },
       { key: 'Enter', action: 'Confirm dialog' },
       { key: 'Esc', action: 'Close dialog / Cancel' },
       { key: 'h', action: 'Show this help' },

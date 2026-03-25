@@ -78,7 +78,7 @@ export class PortfolioStore {
     };
 
     if (updated[index].transactions.length === 0) {
-      return updated.filter(p => p.symbol !== symbol);
+      return updated;
     }
 
     return updated;
