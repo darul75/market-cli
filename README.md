@@ -28,9 +28,22 @@ A modern CLI application for monitoring live stock prices in real-time with port
 
 ## Installation
 
-### Prerequisites
+### Homebrew (macOS)
 
-- [Bun](https://bun.sh) v1.0 or later
+The easiest way to install on macOS:
+
+```bash
+brew install darul75/market-cli/market-cli
+```
+
+To update to the latest version:
+```bash
+brew upgrade darul75/market-cli/market-cli
+```
+
+### From Source
+
+If you prefer to build from source, you'll need [Bun](https://bun.sh) installed.
 - Modern terminal (WezTerm, Alacritty, iTerm2, etc. recommended)
 
 ### Setup

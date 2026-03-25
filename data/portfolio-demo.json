@@ -1,0 +1,114 @@
+{
+  "positions": [
+    {
+      "symbol": "TSLA",
+      "name": "Tesla, Inc.",
+      "transactions": [
+        {
+          "id": "mn5x80a6widvtacyylb",
+          "type": "BUY",
+          "date": "2025-03-25",
+          "qty": 10,
+          "pricePerShare": 288.14
+        },
+        {
+          "id": "mn5x87ktmekvtmklydh",
+          "type": "SELL",
+          "date": "2026-03-25",
+          "qty": 1,
+          "pricePerShare": 383.03
+        }
+      ]
+    },
+    {
+      "symbol": "AMZN",
+      "name": "Amazon.com, Inc.",
+      "transactions": [
+        {
+          "id": "mn5xdauin1uvzxfygq",
+          "type": "BUY",
+          "date": "2021-03-25",
+          "qty": 10,
+          "pricePerShare": 152.31
+        }
+      ]
+    },
+    {
+      "symbol": "GOOG",
+      "name": "Alphabet Inc.",
+      "transactions": [
+        {
+          "id": "mn5xdns14hj1h78emu2",
+          "type": "BUY",
+          "date": "2023-03-25",
+          "qty": 100,
+          "pricePerShare": 103.06
+        },
+        {
+          "id": "mn5xkdxiv6ljmtkta5",
+          "type": "BUY",
+          "date": "2026-03-25",
+          "qty": 2000,
+          "pricePerShare": 289.2
+        }
+      ]
+    },
+    {
+      "symbol": "NFLX",
+      "name": "Netflix, Inc.",
+      "transactions": [
+        {
+          "id": "mn5xdwu1u4yb3u0fkt",
+          "type": "BUY",
+          "date": "2018-03-25",
+          "qty": 200,
+          "pricePerShare": 32.03
+        }
+      ]
+    },
+    {
+      "symbol": "MSFT",
+      "name": "Microsoft Corporation",
+      "transactions": [
+        {
+          "id": "mn5xettrviwe1go37ws",
+          "type": "BUY",
+          "date": "2020-03-25",
+          "qty": 300,
+          "pricePerShare": 146.92
+        }
+      ]
+    },
+    {
+      "symbol": "META",
+      "name": "Meta Platforms, Inc.",
+      "transactions": []
+    },
+    {
+      "symbol": "ETH-USD",
+      "name": "Ethereum USD",
+      "transactions": [
+        {
+          "id": "mn5xge2f8wdrsohvi1n",
+          "type": "BUY",
+          "date": "2015-03-25",
+          "qty": 300,
+          "pricePerShare": 2184.75
+        }
+      ]
+    },
+    {
+      "symbol": "BTC-USD",
+      "name": "Bitcoin USD",
+      "transactions": [
+        {
+          "id": "mn5xgwoxyfkpx766s18",
+          "type": "BUY",
+          "date": "2016-03-25",
+          "qty": 8,
+          "pricePerShare": 417.18
+        }
+      ]
+    }
+  ]
+}

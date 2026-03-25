@@ -25,12 +25,15 @@ jobs:
       - name: Build macOS ARM64
         run: bun build src/main.ts --compile --outfile=market-cli
       
+      - name: Create tar.gz archive
+        run: tar -czvf market-cli-macos-arm64.tar.gz market-cli
+
       - name: Generate checksums
-        run: sha256sum market-cli > SHA256SUMS.txt
+        run: sha256sum market-cli-macos-arm64.tar.gz > SHA256SUMS.txt
       
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            market-cli
+            market-cli-macos-arm64.tar.gz
             SHA256SUMS.txt
