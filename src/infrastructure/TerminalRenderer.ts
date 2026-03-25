@@ -55,7 +55,7 @@ export class TerminalRenderer {
   private historicalPriceService: HistoricalPriceService = new HistoricalPriceService();
 
   // Dialog state
-  private dialogMode: 'none' | 'buy' | 'sell' | 'portfolioGraph' | 'delete' = 'none';
+  private dialogMode: 'none' | 'buy' | 'sell' | 'portfolioGraph' | 'delete' | 'help' = 'none';
   private dialogSymbol: string = '';
   private dialogYear: number = new Date().getFullYear();
   private dialogMonth: number = new Date().getMonth();
@@ -143,6 +143,11 @@ export class TerminalRenderer {
             this.selectedSymbol = '';
             this.selectedIndex = -1;
           }
+        }
+
+        // 'h' opens help dialog
+        if (key.name === 'h' && this.dialogMode === 'none') {
+          this.openHelpDialog();
         }
       });
 
@@ -579,6 +584,7 @@ export class TerminalRenderer {
             zIndex: 100
           },
           this.dialogMode === 'delete' ? this.createDeleteConfirmDialog() : 
+          this.dialogMode === 'help' ? this.createHelpDialog() :
           this.dialogMode === 'portfolioGraph' ? this.createPortfolioGraphDialog() : this.createTransactionDialog()
         )
       );
@@ -1437,6 +1443,63 @@ export class TerminalRenderer {
     if (index !== -1) {
       this.handleDelete(index);
     }
+  }
+
+  openHelpDialog(): void {
+    this.dialogMode = 'help';
+    this.renderWithCurrentStatus();
+  }
+
+  createHelpDialog(): any {
+    const shortcuts = [
+      { key: '↑ / ↓ or Click', action: 'Navigate stocks' },
+      { key: 'b', action: 'Buy dialog (stock selected)' },
+      { key: 's', action: 'Sell dialog (stock selected)' },
+      { key: 'd', action: 'Delete confirmation (stock selected)' },
+      { key: 'Enter', action: 'Confirm dialog' },
+      { key: 'Esc', action: 'Close dialog / Cancel' },
+      { key: 'h', action: 'Show this help' },
+    ];
+
+    const maxKeyWidth = Math.max(...shortcuts.map(s => s.key.length));
+    const maxActionWidth = Math.max(...shortcuts.map(s => s.action.length));
+    const dialogWidth = Math.max(50, maxKeyWidth + maxActionWidth + 4);
+
+    return Box(
+      {
+        id: 'help-dialog',
+        width: dialogWidth,
+        flexDirection: 'column',
+        borderStyle: 'double',
+        borderColor: '#4488FF',
+        backgroundColor: '#08081a',
+        padding: 1,
+        zIndex: 100
+      },
+      Text({ content: '⌨️  KEYBOARD SHORTCUTS', fg: '#4488FF', width: dialogWidth }),
+      Box({ width: '100%', height: 1 }),
+      ...shortcuts.flatMap(s => [
+        Box(
+          { width: dialogWidth, flexDirection: 'row' },
+          Text({ content: `  ${s.key.padEnd(maxKeyWidth)}  `, fg: '#FFFF00', width: maxKeyWidth + 4 }),
+          Text({ content: s.action, fg: '#FFFFFF', width: maxActionWidth })
+        ),
+        Box({ width: '100%', height: 0 })
+      ]),
+      Box({ width: '100%', height: 1 }),
+      Box(
+        { width: dialogWidth, flexDirection: 'row', justifyContent: 'center' },
+        Box(
+          {
+            width: 12,
+            height: 1,
+            backgroundColor: '#004400',
+            onMouseDown: (e: any) => { e.stopPropagation(); this.closeDialog(); }
+          },
+          Text({ content: ' [Esc] Close ', fg: '#44FF44', width: 12 })
+        )
+      )
+    );
   }
 
   private getMaxSellQty(): number {
