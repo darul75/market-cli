@@ -1399,7 +1399,6 @@ export class TerminalRenderer {
     
     const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
     this.dialogPrice = stock ? stock.price.amount.toFixed(2) : '';
-    this.dialogUseDayPrice = false;
     this.dialogFetchingPrice = false;
     
     this.renderWithCurrentStatus();
@@ -1416,7 +1415,6 @@ export class TerminalRenderer {
     
     const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
     this.dialogPrice = stock ? stock.price.amount.toFixed(2) : '';
-    this.dialogUseDayPrice = false;
     this.dialogFetchingPrice = false;
     
     this.renderWithCurrentStatus();
@@ -1660,10 +1658,8 @@ export class TerminalRenderer {
 
     const isBuy = this.dialogMode === 'buy';
     const symbol = this.dialogSymbol;
-    const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
     const title = isBuy ? `BUY: ${symbol}` : `SELL: ${symbol}`;
     const titleColor = isBuy ? '#00FF88' : '#FF6666';
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const loading = this.dialogFetchingPrice;
 
     const qtyInput = Input({ width: 10, maxLength: 8, placeholder: '0', value: this.dialogQty });
@@ -1709,7 +1705,7 @@ export class TerminalRenderer {
 
       Box(
         { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 0 },
-        Text({ content: 'Date: ', width: 6, fg: '#888888' }),
+        Text({ content: 'Date: ', width: 9, fg: '#888888' }),
         arrowBtn('<', () => this.decrementMonth(), loading),
         Text({ content: shortMonths[this.dialogMonth], width: 4, fg: '#FFFFFF' }),
         arrowBtn('>', () => this.incrementMonth(), loading),
@@ -1722,17 +1718,21 @@ export class TerminalRenderer {
         Text({ content: String(this.dialogYear), width: 5, fg: '#FFFFFF' }),
         arrowBtn('>', () => this.incrementYear(), loading)
       ),
-      Box({ width: '100%', height: 1 }),
+      Box({ width: '100%', height: 2 }),
 
       Box(
-        { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 1 },
-        Text({ content: 'Qty: ', width: 5, fg: '#888888' }),
-        qtyInput,
+        { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 1, height: 1 },
+        Text({ content: 'Qty: ', width: 7, fg: '#888888' }),
+        Box(
+          {borderStyle: 'rounded', paddingLeft: 1, borderColor: '#666666'},
+          qtyInput
+        ),
         !isBuy ? Box(
           { flexDirection: 'row' },
           Text({ content: ' (max: ' + this.getMaxSellQty() + ')', fg: '#666666' })
         ) : Box({})
       ),
+
       Box({ width: '100%', height: 1 }),
 
       this.dialogMessage ? Box(
@@ -1741,11 +1741,19 @@ export class TerminalRenderer {
       ) : Box({ width: '100%', height: 1 }),
 
       Box(
-        { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 1 },
-        Text({ content: 'Price: ', width: 6, fg: '#888888' }),
-        priceInput
+        { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 1, height: 1 },
+        Text({ content: 'Price: ', width: 7, fg: '#888888' }),
+        Box(
+          {borderStyle: 'rounded', paddingLeft: 1, borderColor: '#666666'},
+          priceInput
+        ),
+        !isBuy ? Box(
+          { flexDirection: 'row' },
+          Text({ content: ' (max: ' + this.getMaxSellQty() + ')', fg: '#666666' })
+        ) : Box({})
       ),
-      Box({ width: '100%', height: 1 }),
+
+      Box({ width: '100%', height: 2 }),
 
       Box(
         { width: '100%', flexDirection: 'row', justifyContent: 'center', gap: 10 },
