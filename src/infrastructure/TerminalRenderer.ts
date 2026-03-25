@@ -8,7 +8,7 @@ import { HistoricalPriceService } from './HistoricalPriceService.js';
 import { PortfolioHistoryService, PortfolioHistorySummary } from './PortfolioHistoryService.js';
 import { AsciiChart } from './AsciiChart.js';
 
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.2.0';
 
 function debugLog(msg: string): void {
   try {
@@ -515,7 +515,8 @@ export class TerminalRenderer {
       {
         width: '100%',
         flexDirection: 'row',
-        gap: 1
+        gap: 1,
+        height: 9
       },
       searchPanel || Box({}),
       portfolioTotal
@@ -525,7 +526,7 @@ export class TerminalRenderer {
   /**
    * Create portfolio total display box
    */
-  private createPortfolioTotalBox(): any {
+  private createPortfolioTotalBox() {
     const total = this.getPortfolioTotal();
     const currencySymbol = '€';
     const valueStr = `${currencySymbol}${total.value.toFixed(0)}`;
@@ -538,7 +539,7 @@ export class TerminalRenderer {
     return Box(
       {
         id: 'portfolio-total',
-        width: 46,
+        width: '100%',
         flexDirection: 'column',
         borderStyle: 'single',
         borderColor: '#666666',
@@ -624,9 +625,9 @@ export class TerminalRenderer {
         flexGrow: 1
       },
       this.createHeader(status),
+      searchAndTotal,
       this.createMarketSummary(marketData),
       this.createStockTable(marketData.stocks),
-      searchAndTotal,
       this.createFooter(status)
     );
 

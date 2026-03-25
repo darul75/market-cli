@@ -85,7 +85,7 @@ private createScrollableResults(): any {
     return Box({
       id: 'no-results-row',
       width: '100%',
-      height: 3,
+      height: 4,
       justifyContent: 'center',
       alignItems: 'center',
       padding: 1,
