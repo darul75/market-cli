@@ -3,10 +3,12 @@ import * as path from 'path';
 import { Position, Transaction } from '../domain/Position.js';
 
 export interface PortfolioData {
+  version: number;
   positions: Position[];
 }
 
 const DEFAULT_PORTFOLIO: PortfolioData = {
+  version: 1,
   positions: []
 };
 
@@ -24,11 +26,19 @@ export class PortfolioStore {
       }
 
       const content = fs.readFileSync(this.filePath, 'utf-8');
-      const data = JSON.parse(content) as PortfolioData;
+      const rawData = JSON.parse(content);
 
-      if (!this.isValidPortfolioData(data)) {
+      if (!this.isValidPortfolioData(rawData)) {
         console.warn('⚠️ Invalid portfolio data, resetting to empty');
         return [];
+      }
+
+      // Handle backward compatibility - older portfolios without version default to 1
+      const data = rawData as PortfolioData;
+      if (typeof data.version !== 'number') {
+        data.version = 1;
+        // Save with version for future loads
+        this.save(data.positions);
       }
 
       return data.positions || [];
@@ -40,7 +50,7 @@ export class PortfolioStore {
 
   save(positions: Position[]): void {
     try {
-      const data: PortfolioData = { positions };
+      const data: PortfolioData = { version: 1, positions };
       this.ensureDirectoryExists();
       fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), 'utf-8');
     } catch (error) {
@@ -106,6 +116,7 @@ export class PortfolioStore {
       if (typeof p.symbol !== 'string') return false;
       if (!Array.isArray(p.transactions)) return false;
     }
+    // version is optional (defaults to 1 for backward compatibility)
     return true;
   }
 }

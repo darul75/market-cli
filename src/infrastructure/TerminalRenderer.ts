@@ -7,6 +7,10 @@ import { PortfolioStore } from './PortfolioStore.js';
 import { HistoricalPriceService } from './HistoricalPriceService.js';
 import { PortfolioHistoryService, PortfolioHistorySummary } from './PortfolioHistoryService.js';
 import { AsciiChart } from './AsciiChart.js';
+import * as fs from 'fs';
+import * as path from 'path';
+
+const APP_VERSION = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8')).version;
 
 function debugLog(msg: string): void {
   try {
@@ -1239,7 +1243,7 @@ export class TerminalRenderer {
         fg: '#CCCCCC'
       }),
       Text({
-        content: 'Press Ctrl+C to exit',
+        content: `v${APP_VERSION} | Press Ctrl+C to exit`,
         fg: '#CCCCCC'
       })
     );
