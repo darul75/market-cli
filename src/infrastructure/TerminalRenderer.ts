@@ -150,6 +150,16 @@ export class TerminalRenderer {
           this.openHelpDialog();
         }
 
+        // 'o' toggles transaction history panel (expanded view)
+        if (!this.searchActive && key.name === 'o' && this.selectedSymbol && this.dialogMode === 'none') {
+          if (this.expandedSymbols.has(this.selectedSymbol)) {
+            this.expandedSymbols.delete(this.selectedSymbol);
+          } else {
+            this.expandedSymbols.add(this.selectedSymbol);
+          }
+          this.renderWithCurrentStatus();
+        }
+
         // Arrow keys for selection navigation
         if (!this.searchActive && this.dialogMode === 'none') {
           if (key.name === 'up') {
@@ -1498,6 +1508,7 @@ export class TerminalRenderer {
       { key: 'b', action: 'Buy dialog (stock selected)' },
       { key: 's', action: 'Sell dialog (stock selected)' },
       { key: 'd', action: 'Delete confirmation (stock selected)' },
+      { key: 'o', action: 'Toggle transaction history (stock selected)' },
       { key: 'Enter', action: 'Confirm dialog' },
       { key: 'Esc', action: 'Close dialog / Cancel' },
       { key: 'h', action: 'Show this help' },
