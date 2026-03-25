@@ -1774,7 +1774,8 @@ export class TerminalRenderer {
 
     const qtyInput = Input({ width: 10, maxLength: 8, placeholder: '0', value: this.dialogQty });
     qtyInput.on(InputRenderableEvents.INPUT, (value: string) => { this.dialogQty = value; });
-    if (!loading) setTimeout(() => { qtyInput.focus(); }, 0);
+    // TODO: currently 
+    // qtyInput.focus();
 
     const priceInput = Input({ width: 12, maxLength: 10, placeholder: '0.00', value: this.dialogPrice });
     priceInput.on(InputRenderableEvents.INPUT, (value: string) => { this.dialogPrice = value; });

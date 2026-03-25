@@ -15,7 +15,8 @@ A modern CLI application for monitoring live stock prices in real-time with port
 :zap: **Smart Batching** - Efficient API calls with progress tracking  
 :art: **Rich Terminal UI** - Beautiful interface powered by OpenTUI  
 :electric_plug: **Reactive Architecture** - Built with RxJS for smooth data streams  
-:building_construction: **Clean Architecture** - Lightweight Domain-Driven Design  
+:keyboard: **Keyboard Shortcuts** - Full keyboard control (b/s/d/o/x/h/arrows)  
+:dialog: **Confirmation Dialogs** - Delete stocks and transactions with confirmation  
 
 ## Technology Stack
 
@@ -24,37 +25,6 @@ A modern CLI application for monitoring live stock prices in real-time with port
 - **[RxJS](https://rxjs.dev)** - Reactive programming for data streams
 - **[TypeScript](https://typescriptlang.org)** - Type safety and developer experience
 - **Yahoo Finance API** - Real-time stock data via v8 chart endpoint
-
-## Architecture
-
-```
-src/
-├── domain/                 # Core business logic
-│   ├── Stock.ts            # Stock entity with business methods
-│   ├── Price.ts            # Price value object with currency handling
-│   ├── MarketData.ts       # Market data aggregate with analysis
-│   ├── Position.ts         # Position entity with transactions
-│   ├── PositionCalculator.ts # FIFO P&L calculations
-│   └── SearchResult.ts     # Search result entity
-├── infrastructure/         # External adapters
-│   ├── YahooFinanceClient.ts      # API client for stock data (v8 endpoint)
-│   ├── SymbolSearchClient.ts      # Search API client for finding stocks
-│   ├── HistoricalPriceService.ts   # Historical price fetching for transactions
-│   ├── PortfolioStore.ts          # JSON persistence for portfolio
-│   ├── DataTransformationService.ts # Domain object transformation
-│   ├── TerminalRenderer.ts        # OpenTUI interface components
-│   └── search/                   # Search panel components
-│       ├── SearchPanel.ts
-│       ├── SearchInput.ts
-│       └── SearchResultsTable.ts
-├── application/           # Use cases and coordination
-│   ├── StockDataStream.ts         # RxJS reactive data streams
-│   ├── StockMonitorApp.ts        # Main application service
-│   └── SearchService.ts          # Stock search service
-├── shared/                # Shared utilities
-│   └── ProgressTracker.ts        # Loading progress tracking
-└── main.ts               # Application entry point
-```
 
 ## Installation
 
@@ -135,13 +105,29 @@ Last: 9:58:05 AM                                      Press Ctrl+C to exit
 ### How to Use
 
 1. **View stocks** - The main table shows all tracked stocks with live prices
-2. **Select a stock** - Click on any row to select it (shows action buttons)
+2. **Select a stock** - Click on any row or use ↑/↓ arrows to select (shows action buttons)
 3. **Add stocks** - Type in the search panel to find and add new stocks (saved to portfolio)
-4. **Buy stocks** - Click 📈 button to record a BUY transaction
-5. **Sell stocks** - Click 📉 button to record a SELL transaction
-6. **View history** - Click 📋 button to see all transactions for a stock
+4. **Buy stocks** - Press `b` or click 📈 button to record a BUY transaction
+5. **Sell stocks** - Press `s` or click 📉 button to record a SELL transaction
+6. **View history** - Press `o` or click 📋 button to see all transactions for a stock
 7. **Move stocks** - Use 🔼/🔽 buttons to reorder stocks (order persisted)
-8. **Delete stocks** - Click ❌ button to remove a stock from the portfolio
+8. **Delete stocks** - Press `d` or click ❌ button to remove stock from portfolio
+9. **Delete transactions** - Press `x` to delete selected transaction (in history panel)
+10. **View help** - Press `h` to see all keyboard shortcuts
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate stock selection |
+| `b` | Open buy dialog (stock selected) |
+| `s` | Open sell dialog (stock selected) |
+| `d` | Delete stock confirmation (stock selected) |
+| `o` | Toggle transaction history (stock selected) |
+| `x` | Delete selected transaction |
+| `Enter` | Confirm dialog |
+| `Esc` | Close dialog / Cancel |
+| `h` | Show help dialog |
 
 ### Stock Table Columns
 
@@ -175,7 +161,8 @@ Last: 9:58:05 AM                                      Press Ctrl+C to exit
 
 - Portfolio is saved to `data/portfolio.json`
 - Automatically loaded on startup
-- Changes are saved immediately (add stock, buy, sell)
+- Changes are saved immediately (add stock, buy, sell, delete)
+- Stocks remain in portfolio even with 0 transactions (can add new transactions later)
 - Supports empty portfolio - app shows main UI with "No stocks" message
 
 ### BUY/SELL Transactions
@@ -221,6 +208,7 @@ Press 📋 on any stock to view all transactions:
 ### Interactive Table
 
 - **Row selection** - Click to select, click again to deselect
+- **Keyboard navigation** - Use ↑/↓ arrows to navigate stocks
 - **Zebra striping** - Visual distinction between rows
 - **Action buttons** - Visible when row is selected
 - **Scrollable** - Handle large lists with viewport culling
@@ -284,38 +272,19 @@ The portfolio is stored in `data/portfolio.json`:
 }
 ```
 
-## Domain Model
-
-### Core Entities
-
-- **Stock** - Represents individual stocks with price calculations and formatting
-- **Price** - Value object with currency and formatting logic
-- **MarketData** - Aggregate containing multiple stocks with market analysis
-- **Position** - Portfolio position with transaction history
-- **Transaction** - BUY or SELL transaction with date, quantity, and price
-- **SearchResult** - Search result entity with symbol, name, and exchange info
-
-### Business Logic
-
-- FIFO cost basis calculation for realized P&L
-- Price change calculations (absolute and percentage)
-- Volume formatting (K, M, B notation)
-- Market sentiment analysis (Bullish/Bearish/Neutral)
-- Data freshness validation
-- Position summary aggregation
-
 ## Development
 
-### Architecture Decisions
+### Running the App
 
-1. **Lightweight DDD** - Clean domain modeling without over-engineering
-2. **Reactive Streams** - RxJS for elegant async data handling
-3. **Type Safety** - Full TypeScript coverage for reliability
-4. **Progress Tracking** - Real-time feedback during batch loading
-5. **Performance** - Native OpenTUI rendering with viewport culling
-6. **Persistence** - JSON file storage for portfolio data
+```bash
+# Type checking
+bun run type-check
 
-### Testing
+# Manual testing
+bun run src/main.ts
+```
+
+### Extending
 
 ```bash
 # Type checking
