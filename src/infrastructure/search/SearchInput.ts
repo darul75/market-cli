@@ -1,12 +1,5 @@
 import { Input, InputRenderableEvents } from '@opentui/core';
 import type { SearchService } from '../../application/index.js';
-import * as fs from 'fs';
-
-function debugLog(msg: string): void {
-  try {
-    fs.appendFileSync('/tmp/marker-cli-debug.log', `[${new Date().toISOString()}] SearchPanel: ${msg}\n`);
-  } catch {}
-}
 
 /**
  * Simple SearchInput component using basic OpenTUI Input
@@ -14,7 +7,6 @@ function debugLog(msg: string): void {
 export class SearchInput {
   private inputComponent: any = null;
   private searchService: SearchService;
-  private value = "";
   private onQueryChange: (value: string) => void;
   private isRestoring = false;
   private onTyping: () => void; 
@@ -38,7 +30,6 @@ export class SearchInput {
 
     this.inputComponent.on(InputRenderableEvents.INPUT, (value: string) => {
       if (this.isRestoring) return;
-      this.value = value;
       this.onQueryChange(value);
       this.searchService.search(value);
       this.onTyping();
@@ -59,10 +50,6 @@ export class SearchInput {
         this.inputComponent.gotoLineEnd();
       }
     }
-
-    // this.inputComponent.value = currentValue;
-      
-    // this.inputComponent.focus();
 
     return this.inputComponent;
   }

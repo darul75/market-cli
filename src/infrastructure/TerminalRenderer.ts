@@ -8,7 +8,7 @@ import { HistoricalPriceService } from './HistoricalPriceService.js';
 import { PortfolioHistoryService, type PortfolioHistorySummary } from './PortfolioHistoryService.js';
 import { AsciiChart } from './AsciiChart.js';
 
-const APP_VERSION = '0.2.1';
+const APP_VERSION = '0.2.2';
 
 function debugLog(msg: string): void {
   try {
@@ -82,7 +82,7 @@ export class TerminalRenderer {
   private selectedTransactionId: string | null = null;
   private expandedTransactionSymbol: string | null = null;
   // Search active
-  private searchActive: boolean = false;
+  private searchActive: boolean = true;
 
   /**
    * Initialize the renderer
@@ -1120,9 +1120,7 @@ export class TerminalRenderer {
       Text({ content: realText, width: 10, fg: hasTransactions && pos.realizedPL !== 0 ? realColor : '#666666' }),
       buttonSpacer,
       buyBtn,
-      buttonSpacer,
       sellBtn,
-      buttonSpacer,
       detailsBtn,
       buttonSpacer,
       moveUpButton,
