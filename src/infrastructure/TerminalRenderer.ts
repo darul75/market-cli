@@ -55,7 +55,7 @@ export class TerminalRenderer {
   private historicalPriceService: HistoricalPriceService = new HistoricalPriceService();
 
   // Dialog state
-  private dialogMode: 'none' | 'buy' | 'sell' | 'portfolioGraph' = 'none';
+  private dialogMode: 'none' | 'buy' | 'sell' | 'portfolioGraph' | 'delete' = 'none';
   private dialogSymbol: string = '';
   private dialogYear: number = new Date().getFullYear();
   private dialogMonth: number = new Date().getMonth();
@@ -103,6 +103,9 @@ export class TerminalRenderer {
         if (key.name === 'return' && this.dialogMode === 'sell') {
           this.confirmSell();
         }
+        if (key.name === 'return' && this.dialogMode === 'delete') {
+          this.confirmDelete();
+        }
 
         // 'b' opens buy dialog
         if (!this.searchActive && key.name === 'b' && this.selectedSymbol && this.dialogMode === 'none') {
@@ -126,6 +129,17 @@ export class TerminalRenderer {
             }
           } else {
             // Clear stale selection
+            this.selectedSymbol = '';
+            this.selectedIndex = -1;
+          }
+        }
+
+        // 'd' opens delete confirmation dialog
+        if (!this.searchActive && key.name === 'd' && this.selectedSymbol && this.dialogMode === 'none') {
+          const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
+          if (stock) {
+            this.openDeleteConfirmDialog(this.selectedSymbol);
+          } else {
             this.selectedSymbol = '';
             this.selectedIndex = -1;
           }
@@ -564,6 +578,7 @@ export class TerminalRenderer {
             alignItems: 'center',
             zIndex: 100
           },
+          this.dialogMode === 'delete' ? this.createDeleteConfirmDialog() : 
           this.dialogMode === 'portfolioGraph' ? this.createPortfolioGraphDialog() : this.createTransactionDialog()
         )
       );
@@ -985,7 +1000,7 @@ export class TerminalRenderer {
 
     const buyBtn = this.createActionButton('📈', '#00FF88', () => this.openBuyDialog(stock.symbol), isSelected, 0);
     const sellBtn = this.createActionButton('📉', '#FF8888', () => this.openSellDialog(stock.symbol), !hasPosition || !isSelected ? false : true, 1);
-    const deleteBtn = this.createActionButton('❌', '#FF0000', () => this.handleDelete(index - 1), isSelected, 1);
+    const deleteBtn = this.createActionButton('❌', '#FF0000', () => this.openDeleteConfirmDialog(stock.symbol), isSelected, 1);
     
     const isExpanded = this.expandedSymbols.has(stock.symbol);
     const detailsBtn = this.createActionButton('📋', isExpanded ? '#00FFFF' : '#888888', () => {
@@ -997,14 +1012,12 @@ export class TerminalRenderer {
       this.renderWithCurrentStatus();
     }, isSelected && hasTransactions, 1);
     
-    const buttonSpacer = Box({ width: 1, height: 1, backgroundColor: 'transparent' }, Text({ content: ' ', width: 1 }));
+    const buttonSpacer = Box({ width: 1, height: 1, backgroundColor: 'transparent' }, Text({ content: '', width: 1 }));
 
     return Box(
       {
         id: `stock-row-${stock.symbol}-${index}`,
         width: '100%',
-        paddingLeft: 1,
-        paddingRight: 1,
         height: 1,
         flexDirection: 'row',
         alignItems: 'center',
@@ -1364,6 +1377,66 @@ export class TerminalRenderer {
     this.dialogSymbol = '';
     this.dialogMessage = '';
     this.renderWithCurrentStatus();
+  }
+
+  openDeleteConfirmDialog(symbol: string): void {
+    this.dialogMode = 'delete';
+    this.dialogSymbol = symbol;
+    this.renderWithCurrentStatus();
+  }
+
+  createDeleteConfirmDialog(): any {
+    const symbol = this.dialogSymbol;
+
+    return Box(
+      {
+        id: 'delete-dialog',
+        width: 45,
+        flexDirection: 'column',
+        borderStyle: 'double',
+        borderColor: '#FF4444',
+        backgroundColor: '#08081a',
+        padding: 1,
+        zIndex: 100
+      },
+      Text({ content: '⚠️  DELETE STOCK', fg: '#FF4444', width: 45 }),
+      Box({ width: '100%', height: 1 }),
+      Text({ content: `Remove ${symbol} from watchlist?`, fg: '#FFFFFF', width: 45 }),
+      Box({ width: '100%', height: 1 }),
+      Box(
+        { width: 45, flexDirection: 'row', justifyContent: 'center', gap: 3 },
+        Box(
+          {
+            width: 10,
+            height: 1,
+            backgroundColor: '#440000',
+            onMouseDown: (e: any) => { e.stopPropagation(); this.handleDeleteBySymbol(symbol); this.closeDialog(); }
+          },
+          Text({ content: ' [Enter] ', fg: '#FF4444', width: 10 })
+        ),
+        Box(
+          {
+            width: 10,
+            height: 1,
+            backgroundColor: '#004400',
+            onMouseDown: (e: any) => { e.stopPropagation(); this.closeDialog(); }
+          },
+          Text({ content: ' [Esc]  ', fg: '#44FF44', width: 10 })
+        )
+      )
+    );
+  }
+
+  confirmDelete(): void {
+    this.handleDeleteBySymbol(this.dialogSymbol);
+    this.closeDialog();
+  }
+
+  private handleDeleteBySymbol(symbol: string): void {
+    const index = this.marketData!.stocks.findIndex(s => s.symbol === symbol);
+    if (index !== -1) {
+      this.handleDelete(index);
+    }
   }
 
   private getMaxSellQty(): number {
