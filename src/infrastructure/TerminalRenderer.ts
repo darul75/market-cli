@@ -7,10 +7,8 @@ import { PortfolioStore } from './PortfolioStore.js';
 import { HistoricalPriceService } from './HistoricalPriceService.js';
 import { PortfolioHistoryService, PortfolioHistorySummary } from './PortfolioHistoryService.js';
 import { AsciiChart } from './AsciiChart.js';
-import * as fs from 'fs';
-import * as path from 'path';
 
-const APP_VERSION = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8')).version;
+const APP_VERSION = '0.1.0';
 
 function debugLog(msg: string): void {
   try {
