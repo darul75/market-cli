@@ -355,6 +355,12 @@ export class StockDataStream {
       throw new Error('No market data available');
     }
 
+    const existingStock = currentData.stocks.find(s => s.symbol === symbol);
+    if (existingStock) {
+      console.log(`⚠️ ${symbol} is already in the watchlist`);
+      return;
+    }
+
     try {
       const stockData = await this.apiClient.fetchSingleStock(symbol);
       if (stockData) {
