@@ -116,6 +116,19 @@ export class TerminalRenderer {
     return this.displayCurrency === 'EUR' ? '€' : '$';
   }
 
+  private getNativeCurrencySymbol(currency: string): string {
+    switch (currency) {
+      case 'EUR': return '€';
+      case 'USD': return '$';
+      case 'JPY': return '¥';
+      case 'GBP': return '£';
+      case 'CHF': return 'Fr';
+      case 'CAD': return 'C$';
+      case 'AUD': return 'A$';
+      default: return currency;
+    }
+  }
+
   public toggleCurrency(): void {
     this.displayCurrency = this.displayCurrency === 'USD' ? 'EUR' : 'USD';
     this.renderWithCurrentStatus();
@@ -1141,27 +1154,39 @@ export class TerminalRenderer {
     
     const symbolColor = isSelected ? '#00FFFF' : '#00BFFF';
     const position = this.getPosition(stock.symbol);
-    const convertedPrice = this.convertPrice(stock.price.amount, stock.price.currency);
+    const stockCurrency = stock.price.currency;
+    const nativeSymbol = this.getNativeCurrencySymbol(stockCurrency);
+    const displaySymbol = this.getDisplayCurrencySymbol(stockCurrency);
+    
+    // Price column: show native price with native symbol (NOT converted)
+    const nativePrice = stock.price.amount;
+    
+    // Invested: calculate from transaction in native currency (NOT converted)
+    const investedInNative = this.calculateInvestedInNativeCurrency(stock.symbol);
+    
+    // Other values: convert to display currency
+    const convertedPrice = this.convertPrice(stock.price.amount, stockCurrency);
     const pos = this.calculatePositionSummary(stock.symbol, convertedPrice);
     
     const hasPosition = pos.qty > 0;
     const hasTransactions = position && position.transactions.length > 0;
-    const currencySymbol = this.getDisplayCurrencySymbol(stock.price.currency);
 
     const moveUpButton = this.createActionButton('🔼', '#00FF00', () => this.handleMoveUp(index - 1), isSelected, !pos.qty || pos.qty === 0 ? 4: 2);
     const moveDownButton = this.createActionButton('🔽', '#FFFF00', () => this.handleMoveDown(index - 1), isSelected);    
 
     const qtyText = hasPosition ? pos.qty.toString() : '-';
-    const investedText = hasTransactions ? `${currencySymbol}${pos.totalInvested.toFixed(0)}` : '-';
-    const valueText = hasPosition ? `${currencySymbol}${pos.currentValue.toFixed(0)}` : '-';
+    // Invested: show native currency value
+    const investedText = hasTransactions ? `${nativeSymbol}${investedInNative.toFixed(0)}` : '-';
+    // Value/Unreal/Real: show converted to display currency
+    const valueText = hasPosition ? `${displaySymbol}${pos.currentValue.toFixed(0)}` : '-';
     
     const unrealColor = pos.unrealizedPL >= 0 ? '#00FF00' : '#FF0000';
     const unrealSign = pos.unrealizedPL >= 0 ? '+' : '';
-    const unrealText = hasTransactions ? `${unrealSign}${currencySymbol}${pos.unrealizedPL.toFixed(0)}` : '-';
+    const unrealText = hasTransactions ? `${unrealSign}${displaySymbol}${pos.unrealizedPL.toFixed(0)}` : '-';
     
     const realColor = pos.realizedPL >= 0 ? '#00FF00' : '#FF0000';
     const realSign = pos.realizedPL >= 0 ? '+' : '';
-    const realText = hasTransactions ? `${realSign}${currencySymbol}${pos.realizedPL.toFixed(0)}` : '-';
+    const realText = hasTransactions ? `${realSign}${displaySymbol}${pos.realizedPL.toFixed(0)}` : '-';
 
     const buyBtn = this.createActionButton('📈', '#00FF88', () => this.openBuyDialog(stock.symbol), isSelected, 0);
     const sellBtn = this.createActionButton('📉', '#FF8888', () => this.openSellDialog(stock.symbol), !hasPosition || !isSelected ? false : true, 1);
@@ -1200,7 +1225,7 @@ export class TerminalRenderer {
       Text({ content: index.toString(), width: 5, fg: '#CCCCCC' }),
       Text({ content: stock.symbol, width: 10, fg: symbolColor }),
       Text({ content: this.truncateName(stock.name, 19), width: 20, fg: '#888888' }),
-      Text({ content: convertedPrice.toFixed(2), width: 10, fg: '#FFFFFF' }),
+      Text({ content: `${nativeSymbol}${nativePrice.toFixed(2)}`, width: 10, fg: '#FFFFFF' }),
       Text({ content: stock.formattedPriceChange, width: 8, fg: changeColor }),
       Text({ content: qtyText, width: HEADER_WIDTH_QUANTITY, fg: hasPosition ? '#FFFFFF' : '#666666' }),
       Text({ content: investedText, width: HEADER_WIDTH_INVESTED, fg: hasTransactions ? '#888888' : '#666666' }),
@@ -1226,6 +1251,7 @@ export class TerminalRenderer {
 
     const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
     const convertedPrice = stock ? this.convertPrice(stock.price.amount, stock.price.currency) : 0;
+    const displaySymbol = this.getDisplayCurrencySymbol(this.displayCurrency);
     
     // Convert each transaction's native price to display currency for P&L calculation
     const transactionsWithNativePrices = position.transactions.map(t => ({
@@ -1251,7 +1277,15 @@ export class TerminalRenderer {
       const plSign = t.pl >= 0 ? '+' : '';
       const typeColor = t.type === 'BUY' ? '#00FF00' : '#FF8888';
       const typeLabel = t.type === 'BUY' ? 'BUY' : 'SELL';
-      const currencySymbol = this.displayCurrency === 'EUR' ? '€' : '$';
+      
+      // Get original transaction currency and symbol
+      const originalTransaction = position.transactions.find(orig => orig.id === t.id);
+      const origCurrency = originalTransaction?.currency || 'USD';
+      const origSymbol = this.getNativeCurrencySymbol(origCurrency);
+      
+      // Price: show original price in original currency (NOT converted)
+      const originalPrice = originalTransaction?.pricePerShare || t.pricePerShare;
+      
       return Box(
         {
           width: '100%',
@@ -1267,11 +1301,11 @@ export class TerminalRenderer {
         },
         Text({ content: formatDate(t.date), width: 14, fg: '#AAAAAA' }),
         Text({ content: typeLabel, width: 7, fg: typeColor }),
-        Text({ content: `${currencySymbol}${t.pricePerShare.toFixed(2)}`, width: 12, fg: '#888888' }),
+        Text({ content: `${origSymbol}${originalPrice.toFixed(2)}`, width: 12, fg: '#888888' }),
         Text({ content: String(t.qty), width: 10, fg: '#FFFFFF' }),
-        Text({ content: `${plSign}${currencySymbol}${t.pl.toFixed(0)}`, width: 12, fg: plColor }),
+        Text({ content: `${plSign}${displaySymbol}${t.pl.toFixed(0)}`, width: 12, fg: plColor }),
         Text({ content: `${plSign}${t.plPercent.toFixed(0)}%`, width: 8, fg: plColor }),
-        Text({ content: `${currencySymbol}${t.currentValue.toFixed(0)}`, width: 12, fg: '#FFFFFF' }),
+        Text({ content: `${displaySymbol}${t.currentValue.toFixed(0)}`, width: 12, fg: '#FFFFFF' }),
         Box(
           { 
             width: 3,
@@ -1433,6 +1467,21 @@ export class TerminalRenderer {
     }
     const summary = calculatePositionSummary(position.transactions, currentPrice);
     return summary;
+  }
+
+  private calculateInvestedInNativeCurrency(symbol: string): number {
+    const position = this.getPosition(symbol);
+    if (!position || position.transactions.length === 0) return 0;
+    
+    let invested = 0;
+    for (const t of position.transactions) {
+      if (t.type === 'BUY') {
+        invested += t.qty * t.pricePerShare;
+      } else if (t.type === 'SELL') {
+        invested -= t.qty * t.pricePerShare;
+      }
+    }
+    return invested;
   }
 
   getPortfolioTotal(): { value: number; invested: number; pl: number; plPercent: number } {
