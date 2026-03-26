@@ -1775,9 +1775,9 @@ export class TerminalRenderer {
     const dateStr = `${this.dialogYear}-${String(this.dialogMonth + 1).padStart(2, '0')}-${String(this.dialogDay).padStart(2, '0')}`;
 
     // Store the user's entered price as-is (already in display currency from UI)
-    // Currency is the current display currency (USD or EUR)
+    // Currency is the stock's native currency from Yahoo (USD, EUR, JPY, etc.)
     const priceToStore = userEnteredPrice;
-    const currencyToStore = this.displayCurrency;
+    const currencyToStore = stock?.price.currency || 'USD';
 
     const transaction: Transaction = {
       id: this.generateId(),
@@ -1829,9 +1829,9 @@ export class TerminalRenderer {
     const dateStr = `${this.dialogYear}-${String(this.dialogMonth + 1).padStart(2, '0')}-${String(this.dialogDay).padStart(2, '0')}`;
 
     // Store the user's entered price as-is (already in display currency from UI)
-    // Currency is the current display currency (USD or EUR)
+    // Currency is the stock's native currency from Yahoo (USD, EUR, JPY, etc.)
     const sellPriceToStore = userEnteredPrice;
-    const sellCurrencyToStore = this.displayCurrency;
+    const sellCurrencyToStore = stock?.price.currency || 'USD';
 
     const transaction: Transaction = {
       id: this.generateId(),
