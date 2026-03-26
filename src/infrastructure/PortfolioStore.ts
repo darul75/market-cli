@@ -23,20 +23,24 @@ export class PortfolioStore {
     this.apiClient = new YahooFinanceClient();
   }
 
-  private async fetchStockCurrency(symbol: string): Promise<string> {
+  private async fetchStockCurrency(symbol: string): Promise<string | null> {
     if (this.currencyCache.has(symbol)) {
       return this.currencyCache.get(symbol)!;
     }
 
     try {
       const data = await this.apiClient.fetchSingleStock(symbol);
-      const currency = data?.currency || 'USD';
-      this.currencyCache.set(symbol, currency);
-      console.log(`💱 ${symbol}: currency = ${currency}`);
+      const currency = data?.currency || null;
+      if (currency) {
+        this.currencyCache.set(symbol, currency);
+        console.log(`💱 ${symbol}: currency = ${currency}`);
+      } else {
+        console.warn(`⚠️ No currency returned for ${symbol}`);
+      }
       return currency;
     } catch (error) {
       console.warn(`⚠️ Failed to fetch currency for ${symbol}:`, error);
-      return 'USD';
+      return null;
     }
   }
 
@@ -76,7 +80,7 @@ export class PortfolioStore {
             ...position,
             transactions: position.transactions.map(t => ({
               ...t,
-              currency: currency
+              currency: currency || t.currency || 'USD'
             }))
           };
           
