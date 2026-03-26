@@ -1774,24 +1774,10 @@ export class TerminalRenderer {
     const name = stock?.name || this.dialogSymbol;
     const dateStr = `${this.dialogYear}-${String(this.dialogMonth + 1).padStart(2, '0')}-${String(this.dialogDay).padStart(2, '0')}`;
 
-    // User entered price is in display currency - convert back to stock's native currency
-    // If user left blank, use current Yahoo price
-    let priceToStore: number;
-    let currencyToStore: string;
-    
-    if (!isNaN(userEnteredPrice) && userEnteredPrice > 0 && stock) {
-      // Convert from display currency to stock's native currency
-      priceToStore = this.convertFromDisplayCurrency(userEnteredPrice, stock.price.currency);
-      currencyToStore = stock.price.currency;
-    } else if (stock) {
-      // Use current Yahoo price
-      priceToStore = stock.price.amount;
-      currencyToStore = stock.price.currency;
-    } else {
-      // Fallback (shouldn't happen)
-      priceToStore = userEnteredPrice;
-      currencyToStore = 'USD';
-    }
+    // Store the user's entered price as-is (already in display currency from UI)
+    // Currency is the current display currency (USD or EUR)
+    const priceToStore = userEnteredPrice;
+    const currencyToStore = this.displayCurrency;
 
     const transaction: Transaction = {
       id: this.generateId(),
@@ -1842,24 +1828,10 @@ export class TerminalRenderer {
     const name = stock?.name || this.dialogSymbol;
     const dateStr = `${this.dialogYear}-${String(this.dialogMonth + 1).padStart(2, '0')}-${String(this.dialogDay).padStart(2, '0')}`;
 
-    // User entered price is in display currency - convert back to stock's native currency
-    // If user left blank, use current Yahoo price
-    let sellPriceToStore: number;
-    let sellCurrencyToStore: string;
-    
-    if (!isNaN(userEnteredPrice) && userEnteredPrice > 0 && stock) {
-      // Convert from display currency to stock's native currency
-      sellPriceToStore = this.convertFromDisplayCurrency(userEnteredPrice, stock.price.currency);
-      sellCurrencyToStore = stock.price.currency;
-    } else if (stock) {
-      // Use current Yahoo price
-      sellPriceToStore = stock.price.amount;
-      sellCurrencyToStore = stock.price.currency;
-    } else {
-      // Fallback (shouldn't happen)
-      sellPriceToStore = userEnteredPrice;
-      sellCurrencyToStore = 'USD';
-    }
+    // Store the user's entered price as-is (already in display currency from UI)
+    // Currency is the current display currency (USD or EUR)
+    const sellPriceToStore = userEnteredPrice;
+    const sellCurrencyToStore = this.displayCurrency;
 
     const transaction: Transaction = {
       id: this.generateId(),
