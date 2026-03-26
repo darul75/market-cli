@@ -63,38 +63,53 @@ export class TerminalRenderer {
 
   // Currency display
   private displayCurrency: 'USD' | 'EUR' = 'USD';
-  private exchangeRate: number = 1;
-  private exchangeRateFrom: string = 'USD';
+  private exchangeRates: Map<string, number> = new Map();  // currency -> rate (per USD)
 
   public async updateExchangeRate(): Promise<void> {
     if (!this.dataStream) return;
     const apiClient = this.dataStream.getApiClient();
-    this.exchangeRate = await apiClient.fetchExchangeRate('USD', 'EUR');
-    this.exchangeRateFrom = 'USD';
+    this.exchangeRates = await apiClient.fetchExchangeRatesToUSD();
+    console.log('💱 Loaded exchange rates:', Object.fromEntries(this.exchangeRates));
   }
 
   private convertPrice(price: number, stockCurrency: string): number {
     const targetCurrency = this.displayCurrency;
     if (stockCurrency === targetCurrency) return price;
     
-    if (stockCurrency === 'USD' && targetCurrency === 'EUR') {
-      return price * this.exchangeRate;
-    } else if (stockCurrency === 'EUR' && targetCurrency === 'USD') {
-      return price / this.exchangeRate;
+    // Convert: stockCurrency -> USD -> targetCurrency
+    const stockRate = this.exchangeRates.get(stockCurrency);  // per USD
+    const targetRate = this.exchangeRates.get(targetCurrency);  // per USD
+    
+    if (!stockRate || !targetRate) {
+      console.warn(`Missing exchange rate for ${stockCurrency} or ${targetCurrency}`);
+      return price;
     }
-    return price;
+    
+    // Convert stock currency to USD, then to target currency
+    const priceInUSD = price / stockRate;
+    const priceInTarget = priceInUSD * targetRate;
+    
+    return priceInTarget;
   }
 
   private convertFromDisplayCurrency(price: number, stockCurrency: string): number {
     const sourceCurrency = this.displayCurrency;
     if (stockCurrency === sourceCurrency) return price;
     
-    if (sourceCurrency === 'USD' && stockCurrency === 'EUR') {
-      return price / this.exchangeRate;
-    } else if (sourceCurrency === 'EUR' && stockCurrency === 'USD') {
-      return price * this.exchangeRate;
+    // Convert: targetCurrency (display) -> USD -> stockCurrency
+    const sourceRate = this.exchangeRates.get(sourceCurrency);  // per USD
+    const targetRate = this.exchangeRates.get(stockCurrency);  // per USD
+    
+    if (!sourceRate || !targetRate) {
+      console.warn(`Missing exchange rate for ${sourceCurrency} or ${stockCurrency}`);
+      return price;
     }
-    return price;
+    
+    // Convert display currency to USD, then to stock's native currency
+    const priceInUSD = price / sourceRate;
+    const priceInStockCurrency = priceInUSD * targetRate;
+    
+    return priceInStockCurrency;
   }
 
   private getDisplayCurrencySymbol(stockCurrency: string): string {

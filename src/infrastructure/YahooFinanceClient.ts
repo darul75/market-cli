@@ -380,8 +380,28 @@ export class YahooFinanceClient {
       return rate;
     } catch (error) {
       console.error(`Failed to fetch exchange rate ${from}->${to}:`, error);
-      // Return 1 as fallback to avoid breaking the app
       return 1;
     }
+  }
+
+  /**
+   * Fetch multiple exchange rates (all to USD) for common currencies
+   * Returns map: currency code -> rate (how many units per 1 USD)
+   * e.g., { EUR: 0.92, JPY: 149.5, GBP: 0.79 }
+   */
+  async fetchExchangeRatesToUSD(): Promise<Map<string, number>> {
+    const rates = new Map<string, number>();
+    const currencies = ['EUR', 'JPY', 'GBP', 'CHF', 'CAD', 'AUD'];
+    
+    for (const currency of currencies) {
+      try {
+        const rate = await this.fetchExchangeRate(currency, 'USD');
+        rates.set(currency, rate);
+      } catch (error) {
+        console.warn(`Failed to fetch ${currency}->USD rate:`, error);
+      }
+    }
+    
+    return rates;
   }
 }
