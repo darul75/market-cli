@@ -385,9 +385,13 @@ export class YahooFinanceClient {
   }
 
   /**
-   * Fetch multiple exchange rates (all to USD) for common currencies
-   * Returns map: currency code -> rate (how many units per 1 USD)
-   * e.g., { EUR: 0.92, JPY: 149.5, GBP: 0.79 }
+   * Fetch multiple exchange rates with USD as reference
+   * Returns map: currency code -> rate (USD per 1 unit of currency)
+   * e.g., { EUR: 0.86, JPY: 0.0067, GBP: 1.27 }
+   * 
+   * Yahoo pairs: USD{currency}=X gives "USD per 1 {currency}"
+   * - USDEUR=X → 1 EUR = 0.86 USD
+   * - USDJPY=X → 1 JPY = 0.0067 USD
    */
   async fetchExchangeRatesToUSD(): Promise<Map<string, number>> {
     const rates = new Map<string, number>();
@@ -395,10 +399,32 @@ export class YahooFinanceClient {
     
     for (const currency of currencies) {
       try {
-        const rate = await this.fetchExchangeRate(currency, 'USD');
+        // Use USD{currency}=X to get "USD per 1 {currency}"
+        // e.g., USDEUR=X gives EUR to USD rate
+        const pair = `USD${currency}=X`;
+        const url = `${this.baseUrl}/v8/finance/chart/${pair}`;
+        
+        const response = await axios.get(url, {
+          timeout: this.timeout,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        });
+
+        const chartData = response.data?.chart?.result?.[0];
+        if (!chartData?.meta?.regularMarketPrice) {
+          throw new Error(`Invalid exchange rate response for ${currency}`);
+        }
+
+        // USD{currency}=X always returns "currency units per USD"
+        // We need "USD per currency unit", so always invert
+        let rate = chartData.meta.regularMarketPrice;
+        rate = 1 / rate; // Always invert for USD{currency}=X format
+        
         rates.set(currency, rate);
+        console.log(`💱 ${currency}: ${rate} USD per ${currency}`);
       } catch (error) {
-        console.warn(`Failed to fetch ${currency}->USD rate:`, error);
+        console.warn(`Failed to fetch USD${currency} rate:`, error);
       }
     }
     
