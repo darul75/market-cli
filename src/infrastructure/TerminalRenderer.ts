@@ -1,7 +1,7 @@
 import { createCliRenderer, Box, Text, type CliRenderer, ScrollBox, Input, InputRenderableEvents, KeyEvent } from '@opentui/core';
 import type { Stock, MarketData, Position, Transaction } from '../domain/index.js';
 import { calculatePositionSummary, calculateTransactionsWithPL } from '../domain/PositionCalculator.js';
-import type { AppStatus, SearchService } from '../application/index.js';
+import type { AppStatus, SearchService, StockDataStream } from '../application/index.js';
 import { SearchPanel } from './search/index.js';
 import { PortfolioStore } from './PortfolioStore.js';
 import { HistoricalPriceService } from './HistoricalPriceService.js';
@@ -55,6 +55,11 @@ export class TerminalRenderer {
   private positions: Position[] = [];
   private portfolioStore: PortfolioStore = new PortfolioStore();
   private historicalPriceService: HistoricalPriceService = new HistoricalPriceService();
+  private dataStream: StockDataStream | null = null;
+
+  public setDataStream(dataStream: StockDataStream): void {
+    this.dataStream = dataStream;
+  }
 
   // Dialog state
   private dialogMode: 'none' | 'buy' | 'sell' | 'portfolioGraph' | 'delete' | 'help' | 'deleteTransaction' = 'none';
@@ -443,6 +448,10 @@ export class TerminalRenderer {
     this.marketData!.stocks.splice(index, 1);
 
     this.positions = this.positions.filter(p => p.symbol !== stock.symbol);
+    
+    if (this.dataStream) {
+      this.dataStream.removeSymbol(stock.symbol);
+    }
     
     // Adjust selection if needed
     if (this.selectedIndex >= this.marketData!.stocks.length) {
@@ -1101,6 +1110,8 @@ export class TerminalRenderer {
         alignItems: 'center',
         backgroundColor,
         focusable: true,
+        marginLeft: 1,
+        marginRight: 1,
         onMouseDown: (event) => {
           if (this.dialogMode !== 'none') return;
           if (event.button === 0) {

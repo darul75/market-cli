@@ -24,6 +24,9 @@ async function main(): Promise<void> {
     console.log('🎨 Initializing terminal interface...');
     await renderer.initialize();
     
+    // Set data stream reference for deletion handling
+    renderer.setDataStream(app.getDataStream());
+    
     // Load saved portfolio first
     const positions = renderer.loadPortfolio();
     const symbols = positions.map(p => p.symbol);

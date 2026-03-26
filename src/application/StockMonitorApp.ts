@@ -20,6 +20,10 @@ export class StockMonitorApp {
     return this.searchService;
   }
 
+  public getDataStream(): StockDataStream {
+    return this.dataStream;
+  }
+
   public async addStock(symbol: string, name: string): Promise<void> {
     console.log(`Adding ${symbol} (${name}) to watchlist...`);
     await this.dataStream.addStock(symbol, name);

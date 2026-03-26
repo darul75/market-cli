@@ -53,6 +53,11 @@ export class StockDataStream {
     this.trackedSymbols = new Set(symbols);
   }
 
+  public removeSymbol(symbol: string): void {
+    this.trackedSymbols.delete(symbol);
+    this.apiClient.symbols = this.apiClient.symbols.filter(s => s !== symbol);
+  }
+
   /**
    * Observable for market data updates
    */
