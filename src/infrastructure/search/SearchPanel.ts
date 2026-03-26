@@ -175,13 +175,13 @@ export class SearchPanel {
   /**
    * Render the complete search panel UI
    */
-  render(): any {
+  render(shouldFocus: boolean = true): any {
     if (!this.state.visible) return null;
 
     debugLog('Rendering search panel');
 
     // Create input component, passing current query so it survives rerenders
-    const inputComponent = this.searchInput.render(this.state.query);
+    const inputComponent = this.searchInput.render(this.state.query, shouldFocus);
 
     // Create results table
     const tableComponent = this.resultsTable.createTable();

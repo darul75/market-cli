@@ -8,7 +8,7 @@ import { HistoricalPriceService } from './HistoricalPriceService.js';
 import { PortfolioHistoryService, type PortfolioHistorySummary } from './PortfolioHistoryService.js';
 import { AsciiChart } from './AsciiChart.js';
 
-const APP_VERSION = '0.2.2';
+const APP_VERSION = '0.2.3';
 
 function debugLog(msg: string): void {
   try {
@@ -81,8 +81,11 @@ export class TerminalRenderer {
   // Selected transaction in expanded panel
   private selectedTransactionId: string | null = null;
   private expandedTransactionSymbol: string | null = null;
-  // Search active
-  private searchActive: boolean = true;
+  
+  private isInputFocused(): boolean {
+    const focused = (this.renderer as any).currentFocusedRenderable;
+    return focused?.constructor?.name?.includes('Input') || false;
+  }
 
   /**
    * Initialize the renderer
@@ -118,7 +121,7 @@ export class TerminalRenderer {
         }
 
         // 'b' opens buy dialog
-        if (!this.searchActive && key.name === 'b' && this.selectedSymbol && this.dialogMode === 'none') {
+        if (!this.isInputFocused() && key.name === 'b' && this.selectedSymbol && this.dialogMode === 'none') {
           const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
           if (stock) {
             this.openBuyDialog(this.selectedSymbol);
@@ -130,7 +133,7 @@ export class TerminalRenderer {
         }
         
         // 's' opens sell dialog
-        if (!this.searchActive && key.name === 's' && this.selectedSymbol && this.dialogMode === 'none') {
+        if (!this.isInputFocused() && key.name === 's' && this.selectedSymbol && this.dialogMode === 'none') {
           const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
           if (stock) {
             const pos = this.calculatePositionSummary(this.selectedSymbol, 0);
@@ -145,7 +148,7 @@ export class TerminalRenderer {
         }
 
         // 'd' opens delete confirmation dialog
-        if (!this.searchActive && key.name === 'd' && this.selectedSymbol && this.dialogMode === 'none') {
+        if (!this.isInputFocused() && key.name === 'd' && this.selectedSymbol && this.dialogMode === 'none') {
           const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
           if (stock) {
             this.openDeleteConfirmDialog(this.selectedSymbol);
@@ -156,12 +159,12 @@ export class TerminalRenderer {
         }
 
         // 'h' opens help dialog
-        if (!this.searchActive && key.name === 'h' && this.dialogMode === 'none') {
+        if (!this.isInputFocused() && key.name === 'h' && this.dialogMode === 'none') {
           this.openHelpDialog();
         }
 
         // 'o' toggles transaction history panel (expanded view)
-        if (!this.searchActive && key.name === 'o' && this.selectedSymbol && this.dialogMode === 'none') {
+        if (!this.isInputFocused() && key.name === 'o' && this.selectedSymbol && this.dialogMode === 'none') {
           if (this.expandedSymbols.has(this.selectedSymbol)) {
             this.expandedSymbols.delete(this.selectedSymbol);
           } else {
@@ -171,12 +174,12 @@ export class TerminalRenderer {
         }
 
         // 'x' deletes selected transaction
-        if (!this.searchActive && key.name === 'x' && this.selectedTransactionId && this.dialogMode === 'none' && this.expandedTransactionSymbol) {
+        if (!this.isInputFocused() && key.name === 'x' && this.selectedTransactionId && this.dialogMode === 'none' && this.expandedTransactionSymbol) {
           this.openDeleteTransactionDialog(this.expandedTransactionSymbol, this.selectedTransactionId);
         }
 
-        // Arrow keys for selection navigation
-        if (!this.searchActive && this.dialogMode === 'none') {
+        // Arrow keys for selection navigation (always work, even in search)
+        if (this.dialogMode === 'none') {
           if (key.name === 'up') {
             this.moveSelectionUp();
           }
@@ -486,7 +489,7 @@ export class TerminalRenderer {
       onAddStock,
       () => {}, // Close callback
       () => this.renderWithCurrentStatus(),
-      () => {this.searchActive = true},
+      () => {},
       () => this.clearSelection()
     );
     
@@ -502,7 +505,10 @@ export class TerminalRenderer {
       return null;
     }
     
-    return this.searchPanel.render();
+    // Don't auto-focus search when a dialog is open
+    const shouldFocus = this.dialogMode === 'none' && this.selectedIndex === -1;
+
+    return this.searchPanel.render(shouldFocus);
   }
 
   /**
@@ -963,10 +969,7 @@ export class TerminalRenderer {
             alignItems: 'center',
             justifyContent: 'center',
             paddingTop: 2,
-            paddingBottom: 2,
-            onMouseOver: () => {
-              this.searchActive = false;
-            }
+            paddingBottom: 2
           },
           Text({
             content: '📊 No stocks in portfolio',
@@ -992,10 +995,7 @@ export class TerminalRenderer {
         minHeight: 3, // Minimum 3 rows for small terminals
         scrollY: true,
         scrollX: false,
-        viewportCulling: true, // Performance optimization for large lists
-        onMouseOver: () => {
-          this.searchActive = false;
-        }
+        viewportCulling: true // Performance optimization for large lists
       },
       ...rows
     );
@@ -1846,12 +1846,7 @@ export class TerminalRenderer {
         ) : Box({})
       ),
 
-      Box({ width: '100%', height: 1 }),
-
-      this.dialogMessage ? Box(
-        { width: '100%', flexDirection: 'row', justifyContent: 'center' },
-        Text({ content: this.dialogMessage, fg: '#FF4444' })
-      ) : Box({ width: '100%', height: 1 }),
+      Box({ width: '100%', height: 2 }),
 
       Box(
         { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 1, height: 1 },
@@ -1865,6 +1860,14 @@ export class TerminalRenderer {
           Text({ content: ' (max: ' + this.getMaxSellQty() + ')', fg: '#666666' })
         ) : Box({})
       ),
+
+
+      Box({ width: '100%', height: 1 }),
+
+      this.dialogMessage ? Box(
+        { width: '100%', flexDirection: 'row', justifyContent: 'center' },
+        Text({ content: this.dialogMessage, fg: '#FF4444' })
+      ) : Box({ width: '100%', height: 1 }),
 
       Box({ width: '100%', height: 2 }),
 
