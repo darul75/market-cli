@@ -1,6 +1,6 @@
 # Stock Live Monitor
 
-A modern CLI application for monitoring live stock prices in real-time with portfolio tracking, built with OpenTUI, RxJS, and TypeScript using Domain-Driven Design principles.
+A modern CLI application for monitoring live stock prices in real-time with portfolio tracking.
 
 ![Demo](/demo/demo.gif)
 
