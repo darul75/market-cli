@@ -2,6 +2,8 @@
 
 A modern CLI application for monitoring live stock prices in real-time with portfolio tracking, built with OpenTUI, RxJS, and TypeScript using Domain-Driven Design principles.
 
+![Demo](/demo/demo.gif)
+
 ## Features
 
 :rocket: **Real-time Updates** - Stock prices update every 60 seconds  
