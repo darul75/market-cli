@@ -61,7 +61,7 @@ export class SearchResultsTable {
   /**
    * Create scrollable results container
    */
-private createScrollableResults(): any {
+private createScrollableResults() {
   return ScrollBox(
     {
       id: 'search-results-scroll',

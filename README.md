@@ -12,11 +12,7 @@ A modern CLI application for monitoring live stock prices in real-time with port
 :receipt: **Transaction History** - View all transactions for any stock with date picker  
 :floppy_disk: **Persistent Portfolio** - Portfolio saved to JSON file, survives restarts  
 :point_down_1: **Interactive Table** - Select rows, move stocks up/down, delete stocks  
-:zap: **Smart Batching** - Efficient API calls with progress tracking  
-:art: **Rich Terminal UI** - Beautiful interface powered by OpenTUI  
-:electric_plug: **Reactive Architecture** - Built with RxJS for smooth data streams  
 :keyboard: **Keyboard Shortcuts** - Full keyboard control (b/s/d/o/x/h/arrows)  
-:dialog: **Confirmation Dialogs** - Delete stocks and transactions with confirmation  
 
 ## Technology Stack
 

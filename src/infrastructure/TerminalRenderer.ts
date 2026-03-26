@@ -499,7 +499,7 @@ export class TerminalRenderer {
   /**
    * Create search panel using new architecture
    */
-  private createSearchPanel(): any {
+  private createSearchPanel() {
     if (!this.searchPanel) {
       debugLog('ERROR: searchPanel is null when trying to render');
       return null;
@@ -514,7 +514,7 @@ export class TerminalRenderer {
   /**
    * Create search panel and portfolio total side by side
    */
-  private createSearchWithTotal(): any {
+  private createSearchWithTotal() {
     const searchPanel = this.createSearchPanel();
     const portfolioTotal = this.createPortfolioTotalBox();
 
