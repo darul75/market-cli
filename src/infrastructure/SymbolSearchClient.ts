@@ -4,7 +4,7 @@ import * as fs from 'fs';
 
 function debugLog(msg: string): void {
   try {
-    fs.appendFileSync('/tmp/marker-cli-debug.log', `[${new Date().toISOString()}] ${msg}\n`);
+    fs.appendFileSync('/tmp/market-cli-debug.log', `[${new Date().toISOString()}] ${msg}\n`);
   } catch {}
 }
 

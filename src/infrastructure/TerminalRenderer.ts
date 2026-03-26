@@ -7,6 +7,7 @@ import { PortfolioStore } from './PortfolioStore.js';
 import { HistoricalPriceService } from './HistoricalPriceService.js';
 import { PortfolioHistoryService, type PortfolioHistorySummary } from './PortfolioHistoryService.js';
 import { AsciiChart } from './AsciiChart.js';
+import { YahooFinanceClient } from './YahooFinanceClient.js';
 
 const APP_VERSION = '0.2.3';
 
@@ -66,50 +67,62 @@ export class TerminalRenderer {
   private exchangeRates: Map<string, number> = new Map();  // currency -> rate (per USD)
 
   public async updateExchangeRate(): Promise<void> {
-    if (!this.dataStream) return;
-    const apiClient = this.dataStream.getApiClient();
-    this.exchangeRates = await apiClient.fetchExchangeRatesToUSD();
-    console.log('💱 Loaded exchange rates:', Object.fromEntries(this.exchangeRates));
+    debugLog('updateExchangeRate: starting');
+    let apiClient: YahooFinanceClient;
+    
+    if (this.dataStream) {
+      debugLog('updateExchangeRate: using dataStream');
+      apiClient = this.dataStream.getApiClient();
+    } else {
+      debugLog('updateExchangeRate: using fallback client');
+      console.log('💱 Using fallback client for exchange rates');
+      apiClient = new YahooFinanceClient();
+    }
+    
+    try {
+      this.exchangeRates = await apiClient.fetchExchangeRatesToUSD();
+      debugLog('updateExchangeRate: rates loaded ' + JSON.stringify(Object.fromEntries(this.exchangeRates)));
+      console.log('💱 Loaded exchange rates:', Object.fromEntries(this.exchangeRates));
+    } catch (error) {
+      debugLog('updateExchangeRate: error ' + error);
+      console.error('❌ Failed to load exchange rates:', error);
+    }
   }
 
-  private convertPrice(price: number, stockCurrency: string): number {
-    const targetCurrency = this.displayCurrency;
-    if (stockCurrency === targetCurrency) return price;
+  private convertPrice(price: number, fromCurrency: string): number {
+    const toCurrency = this.displayCurrency;
     
-    // Convert: stockCurrency -> USD -> targetCurrency
-    const stockRate = this.exchangeRates.get(stockCurrency);  // per USD
-    const targetRate = this.exchangeRates.get(targetCurrency);  // per USD
-    
-    if (!stockRate || !targetRate) {
-      console.warn(`Missing exchange rate for ${stockCurrency} or ${targetCurrency}`);
+    if (fromCurrency === toCurrency) {
+      debugLog(`No conversion needed: ${price} ${fromCurrency}`);
       return price;
     }
     
-    // Convert stock currency to USD, then to target currency
-    const priceInUSD = price / stockRate;
-    const priceInTarget = priceInUSD * targetRate;
-    
-    return priceInTarget;
-  }
-
-  private convertFromDisplayCurrency(price: number, stockCurrency: string): number {
-    const sourceCurrency = this.displayCurrency;
-    if (stockCurrency === sourceCurrency) return price;
-    
-    // Convert: targetCurrency (display) -> USD -> stockCurrency
-    const sourceRate = this.exchangeRates.get(sourceCurrency);  // per USD
-    const targetRate = this.exchangeRates.get(stockCurrency);  // per USD
-    
-    if (!sourceRate || !targetRate) {
-      console.warn(`Missing exchange rate for ${sourceCurrency} or ${stockCurrency}`);
-      return price;
+    // Convert to USD first (our base currency)
+    let usdPrice: number;
+    if (fromCurrency === 'USD') {
+      usdPrice = price;
+    } else {
+      const fromRate = this.exchangeRates.get(fromCurrency);
+      if (!fromRate || fromRate <= 0) {
+        console.error(`Invalid exchange rate for ${fromCurrency}: ${fromRate}`);
+        throw new Error(`Cannot convert from ${fromCurrency} - invalid exchange rate`);
+      }
+      // Rate represents: 1 unit of fromCurrency = fromRate USD
+      usdPrice = price * fromRate;  // FIXED: was price / fromRate
     }
     
-    // Convert display currency to USD, then to stock's native currency
-    const priceInUSD = price / sourceRate;
-    const priceInStockCurrency = priceInUSD * targetRate;
-    
-    return priceInStockCurrency;
+    // Convert from USD to target currency
+    if (toCurrency === 'USD') {
+      return usdPrice;
+    } else {
+      const toRate = this.exchangeRates.get(toCurrency);
+      if (!toRate || toRate <= 0) {
+        console.error(`Invalid exchange rate for ${toCurrency}: ${toRate}`);
+        throw new Error(`Cannot convert to ${toCurrency} - invalid exchange rate`);
+      }
+      // Rate represents: 1 unit of toCurrency = toRate USD
+      return usdPrice / toRate;  // FIXED: was usdPrice * toRate
+    }
   }
 
   private getDisplayCurrencySymbol(stockCurrency: string): string {
@@ -1166,7 +1179,9 @@ export class TerminalRenderer {
     
     // Other values: convert to display currency
     const convertedPrice = this.convertPrice(stock.price.amount, stockCurrency);
-    const pos = this.calculatePositionSummary(stock.symbol, convertedPrice);
+    
+    // Calculate position with converted price - this handles Value/Unreal/Real
+    const pos = this.calculatePositionSummary(stock.symbol, nativePrice);
     
     const hasPosition = pos.qty > 0;
     const hasTransactions = position && position.transactions.length > 0;
@@ -1175,18 +1190,18 @@ export class TerminalRenderer {
     const moveDownButton = this.createActionButton('🔽', '#FFFF00', () => this.handleMoveDown(index - 1), isSelected);    
 
     const qtyText = hasPosition ? pos.qty.toString() : '-';
-    // Invested: show native currency value
+    // Invested: show native currency value (NOT converted)
     const investedText = hasTransactions ? `${nativeSymbol}${investedInNative.toFixed(0)}` : '-';
     // Value/Unreal/Real: show converted to display currency
-    const valueText = hasPosition ? `${displaySymbol}${pos.currentValue.toFixed(0)}` : '-';
+    const valueText = hasPosition ? `${displaySymbol}${(convertedPrice*pos.qty).toFixed(0)}` : '-';
     
     const unrealColor = pos.unrealizedPL >= 0 ? '#00FF00' : '#FF0000';
     const unrealSign = pos.unrealizedPL >= 0 ? '+' : '';
-    const unrealText = hasTransactions ? `${unrealSign}${displaySymbol}${pos.unrealizedPL.toFixed(0)}` : '-';
+    const unrealText = hasTransactions ? `${unrealSign}${displaySymbol}${this.convertPrice(pos.unrealizedPL, stockCurrency).toFixed(0)}` : '-';
     
     const realColor = pos.realizedPL >= 0 ? '#00FF00' : '#FF0000';
     const realSign = pos.realizedPL >= 0 ? '+' : '';
-    const realText = hasTransactions ? `${realSign}${displaySymbol}${pos.realizedPL.toFixed(0)}` : '-';
+    const realText = hasTransactions ? `${realSign}${displaySymbol}${this.convertPrice(pos.realizedPL, stockCurrency).toFixed(0)}` : '-';
 
     const buyBtn = this.createActionButton('📈', '#00FF88', () => this.openBuyDialog(stock.symbol), isSelected, 0);
     const sellBtn = this.createActionButton('📉', '#FF8888', () => this.openSellDialog(stock.symbol), !hasPosition || !isSelected ? false : true, 1);
@@ -1250,13 +1265,13 @@ export class TerminalRenderer {
     }
 
     const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
-    const convertedPrice = stock ? this.convertPrice(stock.price.amount, stock.price.currency) : 0;
+    const convertedPrice = stock ? stock.price.amount : 0;
     const displaySymbol = this.getDisplayCurrencySymbol(this.displayCurrency);
     
     // Convert each transaction's native price to display currency for P&L calculation
     const transactionsWithNativePrices = position.transactions.map(t => ({
       ...t,
-      pricePerShare: this.convertPrice(t.pricePerShare, t.currency)
+      // pricePerShare: this.convertPrice(t.pricePerShare, t.currency)
     }));
     const transactionsWithPL = calculateTransactionsWithPL(transactionsWithNativePrices, convertedPrice);
 
@@ -1303,9 +1318,9 @@ export class TerminalRenderer {
         Text({ content: typeLabel, width: 7, fg: typeColor }),
         Text({ content: `${origSymbol}${originalPrice.toFixed(2)}`, width: 12, fg: '#888888' }),
         Text({ content: String(t.qty), width: 10, fg: '#FFFFFF' }),
-        Text({ content: `${plSign}${displaySymbol}${t.pl.toFixed(0)}`, width: 12, fg: plColor }),
+        Text({ content: `${plSign}${displaySymbol}${this.convertPrice(t.pl, t.currency).toFixed(0)}`, width: 12, fg: plColor }),
         Text({ content: `${plSign}${t.plPercent.toFixed(0)}%`, width: 8, fg: plColor }),
-        Text({ content: `${displaySymbol}${t.currentValue.toFixed(0)}`, width: 12, fg: '#FFFFFF' }),
+        Text({ content: `${displaySymbol}${this.convertPrice(t.currentValue, t.currency).toFixed(0)}`, width: 12, fg: '#FFFFFF' }),
         Box(
           { 
             width: 3,
@@ -1465,6 +1480,7 @@ export class TerminalRenderer {
     if (!position || position.transactions.length === 0) {
       return { qty: 0, totalInvested: 0, avgCost: 0, currentValue: 0, unrealizedPL: 0, unrealizedPLPercent: 0, realizedPL: 0 };
     }
+    
     const summary = calculatePositionSummary(position.transactions, currentPrice);
     return summary;
   }
@@ -1491,8 +1507,8 @@ export class TerminalRenderer {
     for (const position of this.positions) {
       const stock = this.marketData?.getStock(position.symbol);
       const stockPrice = stock?.price.amount || 0;
-      const convertedPrice = this.convertPrice(stockPrice, stock?.price.currency || 'USD');
-      const summary = this.calculatePositionSummary(position.symbol, convertedPrice);
+      // calculatePositionSummary now handles currency conversion internally
+      const summary = this.calculatePositionSummary(position.symbol, stockPrice);
       
       totalValue += summary.currentValue;
       totalInvested += summary.totalInvested;
@@ -1591,7 +1607,7 @@ export class TerminalRenderer {
     this.dialogQty = '';
     
     const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
-    const convertedPrice = stock ? this.convertPrice(stock.price.amount, stock.price.currency) : 0;
+    const convertedPrice = stock ? stock.price.amount : 0;
     this.dialogPrice = convertedPrice > 0 ? convertedPrice.toFixed(2) : '';
     this.dialogFetchingPrice = false;
     
@@ -1606,7 +1622,7 @@ export class TerminalRenderer {
     this.dialogMessage = '';
     
     const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
-    const convertedPrice = stock ? this.convertPrice(stock.price.amount, stock.price.currency) : 0;
+    const convertedPrice = stock ? stock.price.amount : 0;
     this.dialogPrice = convertedPrice > 0 ? convertedPrice.toFixed(2) : '';
     this.dialogFetchingPrice = false;
     
