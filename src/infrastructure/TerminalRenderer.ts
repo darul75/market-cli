@@ -1366,8 +1366,8 @@ export class TerminalRenderer {
 
   // ========== Portfolio Management ==========
 
-  loadPortfolio(): Position[] {
-    this.positions = this.portfolioStore.load();
+  async loadPortfolio(): Promise<Position[]> {
+    this.positions = await this.portfolioStore.load();
     console.log(`📂 Loaded ${this.positions.length} positions from portfolio`);
     return this.positions;
   }

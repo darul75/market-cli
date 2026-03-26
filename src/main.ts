@@ -31,7 +31,7 @@ async function main(): Promise<void> {
     await renderer.updateExchangeRate();
     
     // Load saved portfolio first
-    const positions = renderer.loadPortfolio();
+    const positions = await renderer.loadPortfolio();
     const symbols = positions.map(p => p.symbol);
     console.log(`📂 Loaded ${positions.length} positions from portfolio`);
     
