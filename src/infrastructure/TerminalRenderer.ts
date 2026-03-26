@@ -9,7 +9,7 @@ import { PortfolioHistoryService, type PortfolioHistorySummary } from './Portfol
 import { AsciiChart } from './AsciiChart.js';
 import { YahooFinanceClient } from './YahooFinanceClient.js';
 
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.3.1';
 
 function debugLog(msg: string): void {
   try {
@@ -144,6 +144,30 @@ export class TerminalRenderer {
 
   public toggleCurrency(): void {
     this.displayCurrency = this.displayCurrency === 'USD' ? 'EUR' : 'USD';
+    
+    // Refresh portfolio graph if it's currently open
+    if (this.dialogMode === 'portfolioGraph') {
+      this.refreshPortfolioGraph();
+    }
+    
+    this.renderWithCurrentStatus();
+  }
+
+  private async refreshPortfolioGraph(): Promise<void> {
+    if (this.dialogMode !== 'portfolioGraph') return;
+    
+    this.graphLoading = true;
+    this.renderWithCurrentStatus();
+    
+    const positionsWithTransactions = this.positions.filter(p => p.transactions.length > 0);
+    this.graphData = await this.portfolioHistoryService.getPortfolioHistory(
+      positionsWithTransactions, 
+      this.graphSelectedRange,
+      this.displayCurrency,
+      this.marketData,
+      (amount, fromCurrency) => this.convertPrice(amount, fromCurrency)
+    );
+    this.graphLoading = false;
     this.renderWithCurrentStatus();
   }
 
@@ -2097,7 +2121,13 @@ export class TerminalRenderer {
     this.renderWithCurrentStatus();
 
     const positionsWithTransactions = this.positions.filter(p => p.transactions.length > 0);
-    this.graphData = await this.portfolioHistoryService.getPortfolioHistory(positionsWithTransactions, this.graphSelectedRange);
+    this.graphData = await this.portfolioHistoryService.getPortfolioHistory(
+      positionsWithTransactions, 
+      this.graphSelectedRange,
+      this.displayCurrency,
+      this.marketData,
+      (amount, fromCurrency) => this.convertPrice(amount, fromCurrency)
+    );
     this.graphLoading = false;
     this.renderWithCurrentStatus();
   }
@@ -2115,7 +2145,13 @@ export class TerminalRenderer {
     this.renderWithCurrentStatus();
 
     const positionsWithTransactions = this.positions.filter(p => p.transactions.length > 0);
-    this.graphData = await this.portfolioHistoryService.getPortfolioHistory(positionsWithTransactions, range);
+    this.graphData = await this.portfolioHistoryService.getPortfolioHistory(
+      positionsWithTransactions, 
+      range,
+      this.displayCurrency,
+      this.marketData,
+      (amount, fromCurrency) => this.convertPrice(amount, fromCurrency)
+    );
     this.graphLoading = false;
     this.renderWithCurrentStatus();
   }
@@ -2163,6 +2199,8 @@ export class TerminalRenderer {
       const chartResult = AsciiChart.renderWithGradient(this.graphData.dataPoints, 35, 10);
       const changeColor = this.graphData.change >= 0 ? '#00FF00' : '#FF0000';
       const changeSign = this.graphData.change >= 0 ? '+' : '';
+      // Use dynamic currency symbol instead of hard-coded EUR
+      const displaySymbol = this.getDisplayCurrencySymbol(this.displayCurrency);
 
       chartContent.push(
         ...chartResult.lines.map((line, rowIdx) =>
@@ -2174,19 +2212,19 @@ export class TerminalRenderer {
         Box({ width: '100%', height: 1 }),
         Box(
           { width: '100%', flexDirection: 'row', justifyContent: 'space-between' },
-          Text({ content: `Min: €${this.graphData.minValue.toFixed(0)}`, fg: '#FF6666' }),
-          Text({ content: `Max: €${this.graphData.maxValue.toFixed(0)}`, fg: '#00FF00' })
+          Text({ content: `Min: ${displaySymbol}${this.graphData.minValue.toFixed(0)}`, fg: '#FF6666' }),
+          Text({ content: `Max: ${displaySymbol}${this.graphData.maxValue.toFixed(0)}`, fg: '#00FF00' })
         ),
         Box({ width: '100%', height: 1 }),
         Box(
           { width: '100%', flexDirection: 'row', justifyContent: 'space-between' },
-          Text({ content: `Start: €${this.graphData.startValue.toFixed(0)}`, fg: '#888888' }),
-          Text({ content: `Now: €${this.graphData.currentValue.toFixed(0)}`, fg: '#FFFFFF' })
+          Text({ content: `Start: ${displaySymbol}${this.graphData.startValue.toFixed(0)}`, fg: '#888888' }),
+          Text({ content: `Now: ${displaySymbol}${this.graphData.currentValue.toFixed(0)}`, fg: '#FFFFFF' })
         ),
         Box({ width: '100%', height: 1 }),
         Box(
           { width: '100%', flexDirection: 'row', justifyContent: 'center' },
-          Text({ content: `${changeSign}€${this.graphData.change.toFixed(0)} (${changeSign}${this.graphData.changePercent.toFixed(2)}%)`, fg: changeColor })
+          Text({ content: `${changeSign}${displaySymbol}${this.graphData.change.toFixed(0)} (${changeSign}${this.graphData.changePercent.toFixed(2)}%)`, fg: changeColor })
         )
       );
     } else {

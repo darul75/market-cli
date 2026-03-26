@@ -25,7 +25,10 @@ export class PortfolioHistoryService {
 
   async getPortfolioHistory(
     positions: Position[],
-    range: '1d' | '5d' | '1mo' | '6mo' | 'ytd' | '1y' | '5y' | 'max'
+    range: '1d' | '5d' | '1mo' | '6mo' | 'ytd' | '1y' | '5y' | 'max',
+    displayCurrency?: 'USD' | 'EUR',
+    marketData?: any,
+    currencyConverter?: (amount: number, fromCurrency: string) => number
   ): Promise<PortfolioHistorySummary | null> {
     if (positions.length === 0) {
       return null;
@@ -55,7 +58,30 @@ export class PortfolioHistoryService {
 
         if (priceOnDate !== null) {
           const sharesAtDate = this.getSharesAtDate(position.transactions, date);
-          totalValue += sharesAtDate * priceOnDate;
+          const positionValue = sharesAtDate * priceOnDate;
+          
+          // Apply currency conversion if converter provided
+          if (currencyConverter && marketData && displayCurrency) {
+            try {
+              // Get stock currency from market data
+              const stock = marketData?.getStock?.(position.symbol);
+              const stockCurrency = stock?.price?.currency || 'USD';
+              
+              // Only convert if different from display currency
+              if (stockCurrency !== displayCurrency) {
+                const convertedValue = currencyConverter(positionValue, stockCurrency);
+                totalValue += convertedValue;
+              } else {
+                totalValue += positionValue;
+              }
+            } catch (error) {
+              console.warn(`⚠️ Currency conversion failed for ${position.symbol} on ${date}, using native value:`, error);
+              totalValue += positionValue; // Fallback to native value
+            }
+          } else {
+            // Legacy behavior: no conversion
+            totalValue += positionValue;
+          }
         }
       }
 
@@ -94,9 +120,10 @@ export class PortfolioHistoryService {
       case '5d': return { days: 5 };
       case '1mo': return { days: 30 };
       case '6mo': return { days: 180 };
-      case 'ytd': 
+      case 'ytd': {
         const startOfYear = new Date(now.getFullYear(), 0, 1);
         return { days: Math.ceil((now.getTime() - startOfYear.getTime()) / (24 * 60 * 60 * 1000)) };
+      }
       case '1y': return { days: 365 };
       case '5y': return { days: 365 * 5 };
       case 'max': return { days: 365 * 10 };
