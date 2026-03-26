@@ -13,6 +13,10 @@ export class YahooFinanceClient {
   private readonly batchDelay = 2000; // 2 seconds between batches
   
   public symbols: string[] = [];
+  
+  private exchangeRateCache: Map<string, number> = new Map();
+  private exchangeRateTimestamp: number = 0;
+  private readonly exchangeRateTTL = 60000; // Cache rate for 1 minute
 
   /**
    * Test API connection by fetching a single stock
@@ -286,7 +290,8 @@ export class YahooFinanceClient {
         name: meta.longName || meta.shortName || symbol,
         price: currentPrice,
         previousClose: previousClose,
-        volume: volume
+        volume: volume,
+        currency: meta.currency || 'USD'
       };
 
     } catch (error: unknown) {
@@ -325,5 +330,58 @@ export class YahooFinanceClient {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Fetch exchange rate between two currencies
+   * Uses Yahoo Finance currency pairs (e.g., EURUSD=X)
+   */
+  async fetchExchangeRate(from: string, to: string): Promise<number> {
+    if (from === to) return 1;
+
+    const cacheKey = `${from}_${to}`;
+    const now = Date.now();
+
+    // Check cache
+    if (this.exchangeRateCache.has(cacheKey) && 
+        now - this.exchangeRateTimestamp < this.exchangeRateTTL) {
+      return this.exchangeRateCache.get(cacheKey)!;
+    }
+
+    try {
+      // For EUR -> USD, use EURUSD=X (gives EUR per 1 USD, so invert)
+      // For USD -> EUR, use EURUSD=X (gives EUR per 1 USD)
+      const pair = from === 'USD' ? `${to}${from}=X` : `${from}${to}=X`;
+      const url = `${this.baseUrl}/v8/finance/chart/${pair}`;
+      
+      const response = await axios.get(url, {
+        timeout: this.timeout,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      const chartData = response.data?.chart?.result?.[0];
+      if (!chartData?.meta?.regularMarketPrice) {
+        throw new Error('Invalid exchange rate response');
+      }
+
+      let rate = chartData.meta.regularMarketPrice;
+      
+      // If going from EUR to USD, we need to invert (Yahoo gives EUR per USD)
+      if (from === 'EUR' && to === 'USD') {
+        rate = 1 / rate;
+      }
+
+      this.exchangeRateCache.set(cacheKey, rate);
+      this.exchangeRateTimestamp = now;
+      
+      console.log(`💱 Exchange rate ${from}->${to}: ${rate.toFixed(4)}`);
+      return rate;
+    } catch (error) {
+      console.error(`Failed to fetch exchange rate ${from}->${to}:`, error);
+      // Return 1 as fallback to avoid breaking the app
+      return 1;
+    }
   }
 }

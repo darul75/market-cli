@@ -13,6 +13,7 @@ export interface StockData {
   previousClose: number;
   volume: number;
   marketCap?: number;
+  currency: string;
 }
 
 export interface ApiResponse {

@@ -8,7 +8,7 @@ export interface PortfolioData {
 }
 
 const DEFAULT_PORTFOLIO: PortfolioData = {
-  version: 1,
+  version: 2,
   positions: []
 };
 
@@ -37,6 +37,20 @@ export class PortfolioStore {
       const data = rawData as PortfolioData;
       if (typeof data.version !== 'number') {
         data.version = 1;
+      }
+
+      // Migration: version 1 -> version 2
+      // Add currency: 'EUR' to all existing transactions (old default)
+      if (data.version < 2) {
+        console.log('🔄 Migrating portfolio to version 2...');
+        data.positions = data.positions.map(position => ({
+          ...position,
+          transactions: position.transactions.map(t => ({
+            ...t,
+            currency: t.currency || 'EUR'  // Old default currency
+          }))
+        }));
+        data.version = 2;
         // Save with version for future loads
         this.save(data.positions);
       }
@@ -50,7 +64,7 @@ export class PortfolioStore {
 
   save(positions: Position[]): void {
     try {
-      const data: PortfolioData = { version: 1, positions };
+      const data: PortfolioData = { version: 2, positions };
       this.ensureDirectoryExists();
       fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), 'utf-8');
     } catch (error) {

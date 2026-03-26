@@ -61,6 +61,39 @@ export class TerminalRenderer {
     this.dataStream = dataStream;
   }
 
+  // Currency display
+  private displayCurrency: 'USD' | 'EUR' = 'USD';
+  private exchangeRate: number = 1;
+  private exchangeRateFrom: string = 'USD';
+
+  public async updateExchangeRate(): Promise<void> {
+    if (!this.dataStream) return;
+    const apiClient = this.dataStream.getApiClient();
+    this.exchangeRate = await apiClient.fetchExchangeRate('USD', 'EUR');
+    this.exchangeRateFrom = 'USD';
+  }
+
+  private convertPrice(price: number, stockCurrency: string): number {
+    const targetCurrency = this.displayCurrency;
+    if (stockCurrency === targetCurrency) return price;
+    
+    if (stockCurrency === 'USD' && targetCurrency === 'EUR') {
+      return price * this.exchangeRate;
+    } else if (stockCurrency === 'EUR' && targetCurrency === 'USD') {
+      return price / this.exchangeRate;
+    }
+    return price;
+  }
+
+  private getDisplayCurrencySymbol(stockCurrency: string): string {
+    return this.displayCurrency === 'EUR' ? '€' : '$';
+  }
+
+  public toggleCurrency(): void {
+    this.displayCurrency = this.displayCurrency === 'USD' ? 'EUR' : 'USD';
+    this.renderWithCurrentStatus();
+  }
+
   // Dialog state
   private dialogMode: 'none' | 'buy' | 'sell' | 'portfolioGraph' | 'delete' | 'help' | 'deleteTransaction' = 'none';
   private dialogSymbol: string = '';
@@ -166,6 +199,11 @@ export class TerminalRenderer {
         // 'h' opens help dialog
         if (!this.isInputFocused() && key.name === 'h' && this.dialogMode === 'none') {
           this.openHelpDialog();
+        }
+
+        // 'c' toggles currency
+        if (!this.isInputFocused() && key.name === 'c' && this.dialogMode === 'none') {
+          this.toggleCurrency();
         }
 
         // 'o' toggles transaction history panel (expanded view)
@@ -544,7 +582,7 @@ export class TerminalRenderer {
    */
   private createPortfolioTotalBox() {
     const total = this.getPortfolioTotal();
-    const currencySymbol = '€';
+    const currencySymbol = this.displayCurrency === 'EUR' ? '€' : '$';
     const valueStr = `${currencySymbol}${total.value.toFixed(0)}`;
     const plSign = total.pl >= 0 ? '+' : '';
     const plColor = total.pl >= 0 ? '#00FF00' : '#FF0000';
@@ -908,11 +946,23 @@ export class TerminalRenderer {
               fg: '#00FF00'
             }),
           ),
-          // Right side: Status indicator (far right)
-          Text({
-            content: this.getStatusIndicator(status),
-            fg: status.isConnected ? '#00FF00' : '#FF0000'
-          })
+          // Right side: Currency toggle + Status indicator
+          Box(
+            {
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 2
+            },
+            Text({
+              content: `💰 ${this.displayCurrency}`,
+              fg: '#FFFF00',
+              onMouseDown: () => this.toggleCurrency()
+            }),
+            Text({
+              content: this.getStatusIndicator(status),
+              fg: status.isConnected ? '#00FF00' : '#FF0000'
+            })
+          )
         )
     );
   }
@@ -1064,11 +1114,12 @@ export class TerminalRenderer {
     
     const symbolColor = isSelected ? '#00FFFF' : '#00BFFF';
     const position = this.getPosition(stock.symbol);
-    const pos = this.calculatePositionSummary(stock.symbol, stock.price.amount);
+    const convertedPrice = this.convertPrice(stock.price.amount, stock.price.currency);
+    const pos = this.calculatePositionSummary(stock.symbol, convertedPrice);
     
     const hasPosition = pos.qty > 0;
     const hasTransactions = position && position.transactions.length > 0;
-    const currencySymbol = stock.price.currency === 'EUR' ? '€' : stock.price.currency;
+    const currencySymbol = this.getDisplayCurrencySymbol(stock.price.currency);
 
     const moveUpButton = this.createActionButton('🔼', '#00FF00', () => this.handleMoveUp(index - 1), isSelected, !pos.qty || pos.qty === 0 ? 4: 2);
     const moveDownButton = this.createActionButton('🔽', '#FFFF00', () => this.handleMoveDown(index - 1), isSelected);    
@@ -1122,14 +1173,13 @@ export class TerminalRenderer {
       Text({ content: index.toString(), width: 5, fg: '#CCCCCC' }),
       Text({ content: stock.symbol, width: 10, fg: symbolColor }),
       Text({ content: this.truncateName(stock.name, 19), width: 20, fg: '#888888' }),
-      Text({ content: stock.price.amount.toFixed(2), width: 10, fg: '#FFFFFF' }),
+      Text({ content: convertedPrice.toFixed(2), width: 10, fg: '#FFFFFF' }),
       Text({ content: stock.formattedPriceChange, width: 8, fg: changeColor }),
       Text({ content: qtyText, width: HEADER_WIDTH_QUANTITY, fg: hasPosition ? '#FFFFFF' : '#666666' }),
       Text({ content: investedText, width: HEADER_WIDTH_INVESTED, fg: hasTransactions ? '#888888' : '#666666' }),
       Text({ content: valueText, width: HEADER_WIDTH_VALUE, fg: hasPosition ? '#FFFFFF' : '#666666' }),
       Text({ content: unrealText, width: HEADER_WIDTH_VALUE, fg: hasPosition ? unrealColor : '#666666' }),
-      Text({ content: realText, width: 10, fg: hasTransactions && pos.realizedPL !== 0 ? realColor : '#666666' }),
-      buttonSpacer,
+      Text({ content: realText, width: 10, fg: hasTransactions && pos.realizedPL !== 0 ? realColor : '#666666' }),      
       buyBtn,
       sellBtn,
       detailsBtn,
@@ -1148,8 +1198,14 @@ export class TerminalRenderer {
     }
 
     const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
-    const currencySymbol = stock?.price.currency === 'EUR' ? '€' : (stock?.price.currency || '$');
-    const transactionsWithPL = calculateTransactionsWithPL(position.transactions, stock?.price.amount || 0);
+    const convertedPrice = stock ? this.convertPrice(stock.price.amount, stock.price.currency) : 0;
+    
+    // Convert each transaction's native price to display currency for P&L calculation
+    const transactionsWithNativePrices = position.transactions.map(t => ({
+      ...t,
+      pricePerShare: this.convertPrice(t.pricePerShare, t.currency)
+    }));
+    const transactionsWithPL = calculateTransactionsWithPL(transactionsWithNativePrices, convertedPrice);
 
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -1168,6 +1224,7 @@ export class TerminalRenderer {
       const plSign = t.pl >= 0 ? '+' : '';
       const typeColor = t.type === 'BUY' ? '#00FF00' : '#FF8888';
       const typeLabel = t.type === 'BUY' ? 'BUY' : 'SELL';
+      const currencySymbol = this.displayCurrency === 'EUR' ? '€' : '$';
       return Box(
         {
           width: '100%',
@@ -1186,7 +1243,7 @@ export class TerminalRenderer {
         Text({ content: `${currencySymbol}${t.pricePerShare.toFixed(2)}`, width: 12, fg: '#888888' }),
         Text({ content: String(t.qty), width: 10, fg: '#FFFFFF' }),
         Text({ content: `${plSign}${currencySymbol}${t.pl.toFixed(0)}`, width: 12, fg: plColor }),
-        Text({ content: `${plSign}${t.plPercent.toFixed(2)}%`, width: 8, fg: plColor }),
+        Text({ content: `${plSign}${t.plPercent.toFixed(0)}%`, width: 8, fg: plColor }),
         Text({ content: `${currencySymbol}${t.currentValue.toFixed(0)}`, width: 12, fg: '#FFFFFF' }),
         Box(
           { 
@@ -1357,8 +1414,9 @@ export class TerminalRenderer {
     
     for (const position of this.positions) {
       const stock = this.marketData?.getStock(position.symbol);
-      const currentPrice = stock?.price.amount || 0;
-      const summary = this.calculatePositionSummary(position.symbol, currentPrice);
+      const stockPrice = stock?.price.amount || 0;
+      const convertedPrice = this.convertPrice(stockPrice, stock?.price.currency || 'USD');
+      const summary = this.calculatePositionSummary(position.symbol, convertedPrice);
       
       totalValue += summary.currentValue;
       totalInvested += summary.totalInvested;
@@ -1457,7 +1515,8 @@ export class TerminalRenderer {
     this.dialogQty = '';
     
     const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
-    this.dialogPrice = stock ? stock.price.amount.toFixed(2) : '';
+    const convertedPrice = stock ? this.convertPrice(stock.price.amount, stock.price.currency) : 0;
+    this.dialogPrice = convertedPrice > 0 ? convertedPrice.toFixed(2) : '';
     this.dialogFetchingPrice = false;
     
 
@@ -1471,7 +1530,8 @@ export class TerminalRenderer {
     this.dialogMessage = '';
     
     const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
-    this.dialogPrice = stock ? stock.price.amount.toFixed(2) : '';
+    const convertedPrice = stock ? this.convertPrice(stock.price.amount, stock.price.currency) : 0;
+    this.dialogPrice = convertedPrice > 0 ? convertedPrice.toFixed(2) : '';
     this.dialogFetchingPrice = false;
     
 
@@ -1624,6 +1684,7 @@ export class TerminalRenderer {
       { key: 'd', action: 'Delete confirmation (stock selected)' },
       { key: 'o', action: 'Toggle transaction history (stock selected)' },
       { key: 'x', action: 'Delete selected transaction' },
+      { key: 'c', action: 'Toggle USD/EUR currency' },
       { key: 'Enter', action: 'Confirm dialog' },
       { key: 'Esc', action: 'Close dialog / Cancel' },
       { key: 'h', action: 'Show this help' },
@@ -1701,12 +1762,17 @@ export class TerminalRenderer {
     const name = stock?.name || this.dialogSymbol;
     const dateStr = `${this.dialogYear}-${String(this.dialogMonth + 1).padStart(2, '0')}-${String(this.dialogDay).padStart(2, '0')}`;
 
+    // Store native price and currency from Yahoo (not the displayed/converted price)
+    const nativePrice = stock?.price.amount || price;
+    const nativeCurrency = stock?.price.currency || 'USD';
+
     const transaction: Transaction = {
       id: this.generateId(),
       type: 'BUY',
       date: dateStr,
       qty,
-      pricePerShare: price
+      pricePerShare: nativePrice,
+      currency: nativeCurrency
     };
 
     this.positions = this.portfolioStore.addTransaction(this.dialogSymbol, name, transaction, this.positions);
@@ -1749,12 +1815,17 @@ export class TerminalRenderer {
     const name = stock?.name || this.dialogSymbol;
     const dateStr = `${this.dialogYear}-${String(this.dialogMonth + 1).padStart(2, '0')}-${String(this.dialogDay).padStart(2, '0')}`;
 
+    // Store native price and currency from Yahoo (not the displayed/converted price)
+    const nativePrice = stock?.price.amount || price;
+    const nativeCurrency = stock?.price.currency || 'USD';
+
     const transaction: Transaction = {
       id: this.generateId(),
       type: 'SELL',
       date: dateStr,
       qty,
-      pricePerShare: price
+      pricePerShare: nativePrice,
+      currency: nativeCurrency
     };
 
     this.positions = this.portfolioStore.addTransaction(this.dialogSymbol, name, transaction, this.positions);

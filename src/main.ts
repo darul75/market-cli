@@ -27,6 +27,9 @@ async function main(): Promise<void> {
     // Set data stream reference for deletion handling
     renderer.setDataStream(app.getDataStream());
     
+    // Fetch exchange rate
+    await renderer.updateExchangeRate();
+    
     // Load saved portfolio first
     const positions = renderer.loadPortfolio();
     const symbols = positions.map(p => p.symbol);

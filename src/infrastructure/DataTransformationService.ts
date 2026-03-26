@@ -36,8 +36,9 @@ export class DataTransformationService {
    * Transform single stock data to domain Stock object
    */
   public transformToStock(stockData: StockData): Stock {
-    const currentPrice = new Price(stockData.price, 'EUR');
-    const previousPrice = new Price(stockData.previousClose, 'EUR');
+    const currency = stockData.currency || 'USD';
+    const currentPrice = new Price(stockData.price, currency);
+    const previousPrice = new Price(stockData.previousClose, currency);
     
     return new Stock(
       stockData.symbol,
@@ -92,7 +93,8 @@ export class DataTransformationService {
         
         if (existingStock) {
           // Update existing stock with new price data
-          const newPrice = new Price(stockData.price, 'EUR');
+          const currency = stockData.currency || 'USD';
+          const newPrice = new Price(stockData.price, currency);
           return existingStock.updatePrice(newPrice).updateVolume(stockData.volume);
         } else {
           // Create new stock

@@ -6,6 +6,7 @@ export interface Transaction {
   date: string;           // YYYY-MM-DD
   qty: number;
   pricePerShare: number;
+  currency: string;        // stock's native currency from Yahoo (EUR, USD, etc.)
 }
 
 export interface TransactionWithPL extends Transaction {

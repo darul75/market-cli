@@ -58,6 +58,10 @@ export class StockDataStream {
     this.apiClient.symbols = this.apiClient.symbols.filter(s => s !== symbol);
   }
 
+  public getApiClient(): YahooFinanceClient {
+    return this.apiClient;
+  }
+
   /**
    * Observable for market data updates
    */
@@ -280,7 +284,8 @@ export class StockDataStream {
               name: s.name,
               price: s.price.amount,
               previousClose: s.previousPrice.amount,
-              volume: s.volume
+              volume: s.volume,
+              currency: s.price.currency
             }))
           );
         }),
