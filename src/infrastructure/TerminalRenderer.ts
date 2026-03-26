@@ -1146,7 +1146,7 @@ export class TerminalRenderer {
     
     const hasPosition = pos.qty > 0;
     const hasTransactions = position && position.transactions.length > 0;
-    const currencySymbol = this.getDisplayCurrencySymbol(stock.price.currency);
+    const currencySymbol = this.displayCurrency === 'EUR' ? '€' : '$';
 
     const moveUpButton = this.createActionButton('🔼', '#00FF00', () => this.handleMoveUp(index - 1), isSelected, !pos.qty || pos.qty === 0 ? 4: 2);
     const moveDownButton = this.createActionButton('🔽', '#FFFF00', () => this.handleMoveDown(index - 1), isSelected);    
