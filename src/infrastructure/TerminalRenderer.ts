@@ -9,7 +9,7 @@ import { PortfolioHistoryService, type PortfolioHistorySummary } from './Portfol
 import { AsciiChart } from './AsciiChart.js';
 import { YahooFinanceClient } from './YahooFinanceClient.js';
 
-const APP_VERSION = '0.2.3';
+const APP_VERSION = '0.3.0';
 
 function debugLog(msg: string): void {
   try {
@@ -1507,11 +1507,26 @@ export class TerminalRenderer {
     for (const position of this.positions) {
       const stock = this.marketData?.getStock(position.symbol);
       const stockPrice = stock?.price.amount || 0;
-      // calculatePositionSummary now handles currency conversion internally
+      const stockCurrency = stock?.price.currency || 'USD';
+      
+      // Get position summary in native currency
       const summary = this.calculatePositionSummary(position.symbol, stockPrice);
       
-      totalValue += summary.currentValue;
-      totalInvested += summary.totalInvested;
+      try {
+        // Convert to display currency before summing - this is crucial!
+        // Without conversion, we'd be adding USD + EUR + JPY which is mathematically invalid
+        const convertedValue = this.convertPrice(summary.currentValue, stockCurrency);
+        const convertedInvested = this.convertPrice(summary.totalInvested, stockCurrency);
+        
+        totalValue += convertedValue;
+        totalInvested += convertedInvested;
+        
+        debugLog(`Portfolio: ${position.symbol} - ${summary.currentValue} ${stockCurrency} → ${convertedValue} ${this.displayCurrency}`);
+      } catch (error) {
+        console.warn(`⚠️ Skipping ${position.symbol} in portfolio total due to currency conversion error:`, error);
+        // Skip this position rather than crash the entire portfolio calculation
+        // This could happen if exchange rates are missing or stale
+      }
     }
     
     const pl = totalValue - totalInvested;
