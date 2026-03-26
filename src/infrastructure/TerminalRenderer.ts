@@ -1377,6 +1377,7 @@ export class TerminalRenderer {
       this.dialogDay = 1;
       this.incrementMonth();
     }
+
     this.scheduleDateChangeFetch();
   }
 
@@ -1387,6 +1388,7 @@ export class TerminalRenderer {
       this.dialogDay = daysInPrevMonth;
       this.decrementMonth();
     }
+
     this.scheduleDateChangeFetch();
   }
 
@@ -1400,6 +1402,7 @@ export class TerminalRenderer {
     if (this.dialogDay > daysInMonth) {
       this.dialogDay = daysInMonth;
     }
+
     this.scheduleDateChangeFetch();
   }
 
@@ -1413,6 +1416,7 @@ export class TerminalRenderer {
     if (this.dialogDay > daysInMonth) {
       this.dialogDay = daysInMonth;
     }
+
     this.scheduleDateChangeFetch();
   }
 
@@ -1422,6 +1426,7 @@ export class TerminalRenderer {
     if (this.dialogDay > daysInMonth) {
       this.dialogDay = daysInMonth;
     }
+
     this.scheduleDateChangeFetch();
   }
 
@@ -1431,30 +1436,26 @@ export class TerminalRenderer {
     if (this.dialogDay > daysInMonth) {
       this.dialogDay = daysInMonth;
     }
+
     this.scheduleDateChangeFetch();
   }
 
   openBuyDialog(symbol: string): void {
     this.dialogMode = 'buy';
     this.dialogSymbol = symbol;
-    this.dialogYear = new Date().getFullYear();
-    this.dialogMonth = new Date().getMonth();
-    this.dialogDay = new Date().getDate();
     this.dialogQty = '';
     
     const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
     this.dialogPrice = stock ? stock.price.amount.toFixed(2) : '';
     this.dialogFetchingPrice = false;
     
+
     this.renderWithCurrentStatus();
   }
 
   openSellDialog(symbol: string): void {
     this.dialogMode = 'sell';
     this.dialogSymbol = symbol;
-    this.dialogYear = new Date().getFullYear();
-    this.dialogMonth = new Date().getMonth();
-    this.dialogDay = new Date().getDate();
     this.dialogQty = '';
     this.dialogMessage = '';
     
@@ -1462,10 +1463,12 @@ export class TerminalRenderer {
     this.dialogPrice = stock ? stock.price.amount.toFixed(2) : '';
     this.dialogFetchingPrice = false;
     
+
     this.renderWithCurrentStatus();
   }
 
   closeDialog(): void {
+
     this.dialogMode = 'none';
     this.dialogSymbol = '';
     this.dialogMessage = '';
