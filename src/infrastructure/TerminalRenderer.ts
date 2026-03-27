@@ -9,7 +9,7 @@ import { PortfolioHistoryService, type PortfolioHistorySummary } from './Portfol
 import { AsciiChart } from './AsciiChart.js';
 import { YahooFinanceClient } from './YahooFinanceClient.js';
 
-const APP_VERSION = '0.3.2';
+const APP_VERSION = '0.3.3';
 
 function debugLog(msg: string): void {
   try {
@@ -18,9 +18,12 @@ function debugLog(msg: string): void {
   } catch {}
 }
 
+const HEADER_WIDTH_SYMBOL = 12;
+const HEADER_WIDTH_PRICE = 12;
+const HEADER_WIDTH_CHANGE = 12;
 const HEADER_WIDTH_QUANTITY = 9;
-const HEADER_WIDTH_INVESTED = 11;
-const HEADER_WIDTH_VALUE = 11;
+const HEADER_WIDTH_INVESTED = 14;
+const HEADER_WIDTH_VALUE = 14;
 
 /**
  * Interface for loading progress information
@@ -86,7 +89,6 @@ export class TerminalRenderer {
     const toCurrency = this.displayCurrency;
     
     if (fromCurrency === toCurrency) {
-      debugLog(`No conversion needed: ${price} ${fromCurrency}`);
       return price;
     }
     
@@ -97,7 +99,7 @@ export class TerminalRenderer {
     } else {
       const fromRate = this.exchangeRates.get(fromCurrency);
       if (!fromRate || fromRate <= 0) {
-        console.error(`Invalid exchange rate for ${fromCurrency}: ${fromRate}`);
+        debugLog(`Invalid exchange rate for ${fromCurrency}: ${fromRate}`);
         throw new Error(`Cannot convert from ${fromCurrency} - invalid exchange rate`);
       }
       // Rate represents: 1 unit of fromCurrency = fromRate USD
@@ -110,7 +112,7 @@ export class TerminalRenderer {
     } else {
       const toRate = this.exchangeRates.get(toCurrency);
       if (!toRate || toRate <= 0) {
-        console.error(`Invalid exchange rate for ${toCurrency}: ${toRate}`);
+        debugLog(`Invalid exchange rate for ${toCurrency}: ${toRate}`);
         throw new Error(`Cannot convert to ${toCurrency} - invalid exchange rate`);
       }
       // Rate represents: 1 unit of toCurrency = toRate USD
@@ -124,13 +126,15 @@ export class TerminalRenderer {
 
   private getNativeCurrencySymbol(currency: string): string {
     switch (currency) {
-      case 'EUR': return '€';
-      case 'USD': return '$';
-      case 'JPY': return '¥';
-      case 'GBP': return '£';
+      case 'AUD': return '$';
+      case 'CAD': return '$';
       case 'CHF': return 'Fr';
-      case 'CAD': return 'C$';
-      case 'AUD': return 'A$';
+      case 'CLP': return '$';
+      case 'EUR': return '€';
+      case 'GBP': return '£';
+      case 'JPY': return '¥';
+      case 'MXN': return '$';
+      case 'USD': return '$';
       default: return currency;
     }
   }
@@ -300,12 +304,15 @@ export class TerminalRenderer {
           this.dialogJustOpened = false;
           return; // Skip processing this key event
         }
-
+        
         if (key.name === 'escape' && this.dialogMode !== 'none') {
           this.closeDialog();
         }
 
-        // Enter key confirms buy/sell
+        if (key.name === 'return' && this.dialogMode === 'search') {
+          this.searchPanel?.addStock();
+        }
+
         if (key.name === 'return' && this.dialogMode === 'buy') {
           this.confirmBuy();
         }
@@ -326,6 +333,15 @@ export class TerminalRenderer {
           }
           if (key.name === 'down') {
             this.moveSelectionDown();
+          }
+        }
+
+        if (this.dialogMode === 'search') {
+          if (key.name === 'up') {
+            this.searchPanel?.moveSelectionUp();
+          }
+          if (key.name === 'down') {
+            this.searchPanel?.moveSelectionDown();
           }
         }
       });
@@ -1084,8 +1100,12 @@ export class TerminalRenderer {
     } else {
       stocks.forEach((stock, index) => {
         rows.push(this.createStockRow(stock, index + 1, index % 2 === 0, index === this.selectedIndex));
+        
         if (this.expandedSymbols.has(stock.symbol)) {
-          rows.push(this.createPurchaseHistoryPanel(stock.symbol));
+          const position = this.getPosition(stock.symbol);
+          if (position && position.transactions.length > 0) {
+            rows.push(this.createPurchaseHistoryPanel(stock.symbol));
+          }
         }
       });
     }
@@ -1130,10 +1150,10 @@ export class TerminalRenderer {
         paddingRight: 1,
       },
       Text({ content: '#', width: 5, fg: '#FFFFFF' }),
-      Text({ content: 'Symbol', width: 10, fg: '#FFFFFF' }),
+      Text({ content: 'Symbol', width: HEADER_WIDTH_SYMBOL, fg: '#FFFFFF' }),
       Text({ content: 'Name', width: 20, fg: '#FFFFFF' }),
-      Text({ content: 'Price', width: 10, fg: '#FFFFFF' }),
-      Text({ content: 'Change', width: 8, fg: '#FFFFFF' }),
+      Text({ content: 'Price', width: HEADER_WIDTH_PRICE, fg: '#FFFFFF' }),
+      Text({ content: 'Change', width: HEADER_WIDTH_CHANGE, fg: '#FFFFFF' }),
       Text({ content: 'Qty', width: HEADER_WIDTH_QUANTITY, fg: '#FFFFFF' }),
       Text({ content: 'Invested', width: HEADER_WIDTH_INVESTED, fg: '#FFFFFF' }),
       Text({ content: 'Value', width: HEADER_WIDTH_VALUE, fg: '#FFFFFF' }),
@@ -1229,10 +1249,10 @@ export class TerminalRenderer {
         }
       },
       Text({ content: index.toString(), width: 5, fg: '#CCCCCC' }),
-      Text({ content: stock.symbol, width: 10, fg: symbolColor }),
+      Text({ content: stock.symbol, width: HEADER_WIDTH_SYMBOL, fg: symbolColor }),
       Text({ content: this.truncateName(stock.name, 19), width: 20, fg: '#888888' }),
-      Text({ content: `${nativeSymbol}${nativePrice.toFixed(2)}`, width: 10, fg: '#FFFFFF' }),
-      Text({ content: stock.formattedPriceChange, width: 8, fg: changeColor }),
+      Text({ content: `${nativeSymbol}${nativePrice.toFixed(2)}`, width: HEADER_WIDTH_PRICE, fg: '#FFFFFF' }),
+      Text({ content: stock.formattedPriceChange, width: HEADER_WIDTH_CHANGE, fg: changeColor }),
       Text({ content: qtyText, width: HEADER_WIDTH_QUANTITY, fg: hasPosition ? '#FFFFFF' : '#666666' }),
       Text({ content: investedText, width: HEADER_WIDTH_INVESTED, fg: hasTransactions ? '#888888' : '#666666' }),
       Text({ content: valueText, width: HEADER_WIDTH_VALUE, fg: hasPosition ? '#FFFFFF' : '#666666' }),
