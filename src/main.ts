@@ -9,8 +9,6 @@ import { combineLatest } from 'rxjs';
  * Main application entry point
  */
 async function main(): Promise<void> {
-  console.log('🚀 Starting Stock Monitor...\n');
-  
   let app: StockMonitorApp | null = null;
   let renderer: TerminalRenderer | null = null;
   let currentProgress: ProgressUpdate | null = null;
@@ -21,7 +19,6 @@ async function main(): Promise<void> {
     renderer = new TerminalRenderer();
     
     // Initialize OpenTUI renderer
-    console.log('🎨 Initializing terminal interface...');
     await renderer.initialize();
     
     // Set data stream reference for deletion handling
@@ -33,7 +30,6 @@ async function main(): Promise<void> {
     // Load saved portfolio first
     const positions = await renderer.loadPortfolio();
     const symbols = positions.map(p => p.symbol);
-    console.log(`📂 Loaded ${positions.length} positions from portfolio`);
     
     // Set up search service
     const currentApp = app;
@@ -41,7 +37,6 @@ async function main(): Promise<void> {
     renderer.setupSearchService(
       currentApp.getSearchService(),
       async (symbol: string, name: string) => {
-        console.log(`\n✅ Adding ${symbol} (${name}) to watchlist...`);
         currentRenderer.addSymbol(symbol, name);
         await currentApp.addStock(symbol, name);
       }
@@ -74,14 +69,7 @@ async function main(): Promise<void> {
     renderer.renderLoading();
     
     // Start the application with saved symbols
-    console.log('📊 Starting data streams...');
     const { marketData$, status$ } = app.start(symbols);
-    
-    if (symbols.length > 0) {
-      console.log(`📈 Fetching data for ${symbols.length} stocks...\n`);
-    } else {
-      console.log('📈 No stocks in portfolio. Use search to add stocks.\n');
-    }
     
     // Subscribe to reactive streams and update UI
     combineLatest([marketData$, status$]).subscribe({
@@ -128,7 +116,6 @@ async function main(): Promise<void> {
 
   // Handle graceful shutdown
   const shutdown = () => {
-    console.log('\n\n🛑 Shutting down...');
     
     progressTracker.reset();
     
@@ -139,8 +126,7 @@ async function main(): Promise<void> {
     if (renderer) {
       renderer.destroy();
     }
-    
-    console.log('👋 Goodbye!');
+
     process.exit(0);
   };
 

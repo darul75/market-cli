@@ -1,4 +1,4 @@
-import { createCliRenderer, Box, Text, type CliRenderer, ScrollBox, Input, InputRenderableEvents, KeyEvent } from '@opentui/core';
+import { createCliRenderer, Box, Text, type CliRenderer, ScrollBox, Input, InputRenderableEvents, KeyEvent, MouseEvent } from '@opentui/core';
 import type { Stock, MarketData, Position, Transaction } from '../domain/index.js';
 import { calculatePositionSummary, calculateTransactionsWithPL } from '../domain/PositionCalculator.js';
 import type { AppStatus, SearchService, StockDataStream } from '../application/index.js';
@@ -9,7 +9,7 @@ import { PortfolioHistoryService, type PortfolioHistorySummary } from './Portfol
 import { AsciiChart } from './AsciiChart.js';
 import { YahooFinanceClient } from './YahooFinanceClient.js';
 
-const APP_VERSION = '0.3.1';
+const APP_VERSION = '0.3.2';
 
 function debugLog(msg: string): void {
   try {
@@ -67,25 +67,18 @@ export class TerminalRenderer {
   private exchangeRates: Map<string, number> = new Map();  // currency -> rate (per USD)
 
   public async updateExchangeRate(): Promise<void> {
-    debugLog('updateExchangeRate: starting');
     let apiClient: YahooFinanceClient;
     
     if (this.dataStream) {
-      debugLog('updateExchangeRate: using dataStream');
       apiClient = this.dataStream.getApiClient();
     } else {
-      debugLog('updateExchangeRate: using fallback client');
-      console.log('💱 Using fallback client for exchange rates');
       apiClient = new YahooFinanceClient();
     }
     
     try {
       this.exchangeRates = await apiClient.fetchExchangeRatesToUSD();
-      debugLog('updateExchangeRate: rates loaded ' + JSON.stringify(Object.fromEntries(this.exchangeRates)));
-      console.log('💱 Loaded exchange rates:', Object.fromEntries(this.exchangeRates));
     } catch (error) {
       debugLog('updateExchangeRate: error ' + error);
-      console.error('❌ Failed to load exchange rates:', error);
     }
   }
 
@@ -125,7 +118,7 @@ export class TerminalRenderer {
     }
   }
 
-  private getDisplayCurrencySymbol(stockCurrency: string): string {
+  private getDisplayCurrencySymbol(): string {
     return this.displayCurrency === 'EUR' ? '€' : '$';
   }
 
@@ -172,7 +165,7 @@ export class TerminalRenderer {
   }
 
   // Dialog state
-  private dialogMode: 'none' | 'buy' | 'sell' | 'portfolioGraph' | 'delete' | 'help' | 'deleteTransaction' = 'none';
+  private dialogMode: 'none' | 'buy' | 'sell' | 'portfolioGraph' | 'delete' | 'help' | 'deleteTransaction' | 'search' = 'none';
   private dialogSymbol: string = '';
   private dialogYear: number = new Date().getFullYear();
   private dialogMonth: number = new Date().getMonth();
@@ -185,6 +178,9 @@ export class TerminalRenderer {
   private dialogTransactionSymbol: string = '';
   private dialogTransactionId: string = '';
 
+  // Dialog focus management
+  private dialogJustOpened: boolean = false;
+
   // Portfolio graph state
   private portfolioHistoryService: PortfolioHistoryService = new PortfolioHistoryService();
   private graphSelectedRange: '1d' | '5d' | '1mo' | '6mo' | 'ytd' | '1y' | '5y' | 'max' = '1mo';
@@ -196,10 +192,9 @@ export class TerminalRenderer {
   // Selected transaction in expanded panel
   private selectedTransactionId: string | null = null;
   private expandedTransactionSymbol: string | null = null;
-  
-  private isInputFocused(): boolean {
-    const focused = (this.renderer as any).currentFocusedRenderable;
-    return focused?.constructor?.name?.includes('Input') || false;
+
+  isInputFocused(): boolean {
+    return this.dialogMode !== 'none';
   }
 
   /**
@@ -207,7 +202,6 @@ export class TerminalRenderer {
    */
   async initialize(): Promise<void> {
     try {
-      console.log('🎨 Initializing OpenTUI renderer...');
       this.renderer = await createCliRenderer({
         exitOnCtrlC: true,
         useMouse: true, // Enable mouse events
@@ -215,8 +209,98 @@ export class TerminalRenderer {
         enableMouseMovement: true // Enable hover tracking
       });
 
+      this.renderer.prependInputHandler((sequence: string) => {
+        debugLog(sequence);
+
+        if (!this.isInputFocused() && sequence === 'b' && this.selectedSymbol && this.dialogMode === 'none') {
+          const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
+          if (stock) {
+            this.openBuyDialog(this.selectedSymbol);
+          } else {
+            // Clear stale selection
+            this.selectedSymbol = '';
+            this.selectedIndex = -1;
+          }
+
+          return true;
+        }
+
+        // 's' opens sell dialog
+        if (!this.isInputFocused() && sequence === 's' && this.selectedSymbol && this.dialogMode === 'none') {
+          const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
+          if (stock) {
+            const pos = this.calculatePositionSummary(this.selectedSymbol, 0);
+            if (pos.qty > 0) {
+              this.openSellDialog(this.selectedSymbol);
+            }
+          } else {
+            // Clear stale selection
+            this.selectedSymbol = '';
+            this.selectedIndex = -1;
+          }
+
+          return true;
+        }
+
+        // 'o' toggles transaction history panel (expanded view)
+        if (!this.isInputFocused() && sequence === 'o' && this.selectedSymbol && this.dialogMode === 'none') {
+          if (this.expandedSymbols.has(this.selectedSymbol)) {
+            this.expandedSymbols.delete(this.selectedSymbol);
+          } else {
+            this.expandedSymbols.add(this.selectedSymbol);
+          }
+          this.renderWithCurrentStatus();
+
+          return true;
+        }
+
+        // 'd' opens delete confirmation dialog
+        if (!this.isInputFocused() && sequence === 'd' && this.selectedSymbol && this.dialogMode === 'none') {
+          const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
+          if (stock) {
+            this.openDeleteConfirmDialog(this.selectedSymbol);
+          } else {
+            this.selectedSymbol = '';
+            this.selectedIndex = -1;
+          }
+          return true;
+        }
+
+        // 'h' opens help dialog
+        if (!this.isInputFocused() && sequence === 'h' && this.dialogMode === 'none') {
+          this.openHelpDialog();
+          return true;
+        }
+
+        // 'f' opens search dialog
+        if (!this.isInputFocused() && sequence === 'f' && this.dialogMode === 'none') {
+          this.openSearchDialog();
+          return true;
+        }
+
+        // 'c' toggles currency
+        if (!this.isInputFocused() && sequence === 'c' && this.dialogMode === 'none') {
+          this.toggleCurrency();
+          return true;
+        }
+
+        // 'x' deletes selected transaction
+        if (!this.isInputFocused() && sequence === 'x' && this.selectedTransactionId && this.dialogMode === 'none' && this.expandedTransactionSymbol) {
+          this.openDeleteTransactionDialog(this.expandedTransactionSymbol, this.selectedTransactionId);
+          return true;
+        }
+
+        return false;
+      });
+
       // Use keyInput EventEmitter to capture keyboard events
       (this.renderer as any).keyInput?.on('keypress', (key: any) => {
+        // Reset dialog just opened flag after any key press
+        if (this.dialogJustOpened) {
+          this.dialogJustOpened = false;
+          return; // Skip processing this key event
+        }
+
         if (key.name === 'escape' && this.dialogMode !== 'none') {
           this.closeDialog();
         }
@@ -235,69 +319,6 @@ export class TerminalRenderer {
           this.confirmDeleteTransaction();
         }
 
-        // 'b' opens buy dialog
-        if (!this.isInputFocused() && key.name === 'b' && this.selectedSymbol && this.dialogMode === 'none') {
-          const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
-          if (stock) {
-            this.openBuyDialog(this.selectedSymbol);
-          } else {
-            // Clear stale selection
-            this.selectedSymbol = '';
-            this.selectedIndex = -1;
-          }
-        }
-        
-        // 's' opens sell dialog
-        if (!this.isInputFocused() && key.name === 's' && this.selectedSymbol && this.dialogMode === 'none') {
-          const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
-          if (stock) {
-            const pos = this.calculatePositionSummary(this.selectedSymbol, 0);
-            if (pos.qty > 0) {
-              this.openSellDialog(this.selectedSymbol);
-            }
-          } else {
-            // Clear stale selection
-            this.selectedSymbol = '';
-            this.selectedIndex = -1;
-          }
-        }
-
-        // 'd' opens delete confirmation dialog
-        if (!this.isInputFocused() && key.name === 'd' && this.selectedSymbol && this.dialogMode === 'none') {
-          const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
-          if (stock) {
-            this.openDeleteConfirmDialog(this.selectedSymbol);
-          } else {
-            this.selectedSymbol = '';
-            this.selectedIndex = -1;
-          }
-        }
-
-        // 'h' opens help dialog
-        if (!this.isInputFocused() && key.name === 'h' && this.dialogMode === 'none') {
-          this.openHelpDialog();
-        }
-
-        // 'c' toggles currency
-        if (!this.isInputFocused() && key.name === 'c' && this.dialogMode === 'none') {
-          this.toggleCurrency();
-        }
-
-        // 'o' toggles transaction history panel (expanded view)
-        if (!this.isInputFocused() && key.name === 'o' && this.selectedSymbol && this.dialogMode === 'none') {
-          if (this.expandedSymbols.has(this.selectedSymbol)) {
-            this.expandedSymbols.delete(this.selectedSymbol);
-          } else {
-            this.expandedSymbols.add(this.selectedSymbol);
-          }
-          this.renderWithCurrentStatus();
-        }
-
-        // 'x' deletes selected transaction
-        if (!this.isInputFocused() && key.name === 'x' && this.selectedTransactionId && this.dialogMode === 'none' && this.expandedTransactionSymbol) {
-          this.openDeleteTransactionDialog(this.expandedTransactionSymbol, this.selectedTransactionId);
-        }
-
         // Arrow keys for selection navigation (always work, even in search)
         if (this.dialogMode === 'none') {
           if (key.name === 'up') {
@@ -313,8 +334,6 @@ export class TerminalRenderer {
       
       // Set up resize event handling
       this.setupResizeHandling();
-      
-      debugLog('✅ OpenTUI renderer initialized successfully');
     } catch (error) {
       debugLog(`❌ Failed to initialize OpenTUI renderer: ${error}`);
       throw error;
@@ -385,12 +404,15 @@ export class TerminalRenderer {
             this.renderer.root.remove(child.id);
           } catch (e) {
             // Ignore errors removing individual children
+            debugLog('exception removing child')
           }
         }
       }
     } catch (e) {
       // Ignore errors during clear
     }
+
+    this.renderer.focusRenderable(this.renderer.root);
   }
 
   /**
@@ -621,40 +643,6 @@ export class TerminalRenderer {
   }
 
   /**
-   * Create search panel using new architecture
-   */
-  private createSearchPanel() {
-    if (!this.searchPanel) {
-      debugLog('ERROR: searchPanel is null when trying to render');
-      return null;
-    }
-    
-    // Don't auto-focus search when a dialog is open
-    const shouldFocus = this.dialogMode === 'none' && this.selectedIndex === -1;
-
-    return this.searchPanel.render(shouldFocus);
-  }
-
-  /**
-   * Create search panel and portfolio total side by side
-   */
-  private createSearchWithTotal() {
-    const searchPanel = this.createSearchPanel();
-    const portfolioTotal = this.createPortfolioTotalBox();
-
-    return Box(
-      {
-        width: '100%',
-        flexDirection: 'row',
-        gap: 1,
-        height: 9
-      },
-      searchPanel || Box({}),
-      portfolioTotal
-    );
-  }
-
-  /**
    * Create portfolio total display box
    */
   private createPortfolioTotalBox() {
@@ -670,63 +658,28 @@ export class TerminalRenderer {
     return Box(
       {
         id: 'portfolio-total',
-        width: '100%',
-        flexDirection: 'column',
-        borderStyle: 'single',
-        borderColor: '#666666',
-        backgroundColor: '#000000',
+        flexDirection: 'row',
+        gap: 2,
         paddingLeft: 1,
         paddingRight: 1
       },
-      Box(
-        {
-          width: '100%',
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          height: 1
-        },
+      Text({
+          content: valueStr,
+          fg: '#FFFFFF'
+        }),
         Text({
-          content: '💼 Portfolio',
-          fg: '#00FF00'
+          content: plStr,
+          fg: plColor
         }),
         hasTransactions ? Box(
           {
             width: 3,
             height: 1,
             backgroundColor: '#222244',
-            onMouseDown: (e: any) => { e.stopPropagation(); this.openPortfolioGraphDialog(); }
+            onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.openPortfolioGraphDialog(); }
           },
           Text({ content: '📊', width: 2, fg: '#00BFFF' })
-        ) : Box({ width: 3 })
-      ),
-      Box(
-        {
-          width: '100%',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: 2,
-          marginTop: 1
-        },
-        Text({
-          content: valueStr,
-          fg: '#FFFFFF'
-        })
-      ),
-      Box(
-        {
-          width: '100%',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: 2
-        },
-        Text({
-          content: plStr,
-          fg: plColor
-        })
-      )
+        ) : Box({ width: 3 }),
     );
   }
 
@@ -745,9 +698,6 @@ export class TerminalRenderer {
     // Clear previous content first
     this.clearScreen();
 
-    // Create search panel and portfolio total side by side
-    const searchAndTotal = this.createSearchWithTotal();
-
     // Normal content column
     const content = Box(
       {
@@ -756,7 +706,6 @@ export class TerminalRenderer {
         flexGrow: 1
       },
       this.createHeader(status),
-      searchAndTotal,
       this.createMarketSummary(marketData),
       this.createStockTable(marketData.stocks),
       this.createFooter(status)
@@ -787,6 +736,7 @@ export class TerminalRenderer {
           this.dialogMode === 'delete' ? this.createDeleteConfirmDialog() : 
           this.dialogMode === 'deleteTransaction' ? this.createDeleteTransactionDialog() :
           this.dialogMode === 'help' ? this.createHelpDialog() :
+          this.dialogMode === 'search' ? this.createSearchDialog() :
           this.dialogMode === 'portfolioGraph' ? this.createPortfolioGraphDialog() : this.createTransactionDialog()
         )
       );
@@ -993,6 +943,9 @@ export class TerminalRenderer {
    * Create header component
    */
   private createHeader(status: AppStatus) {
+
+    const portfolioTotal = this.createPortfolioTotalBox();
+
     return Box(
       {
         width: '100%',
@@ -1023,6 +976,15 @@ export class TerminalRenderer {
               fg: '#00FF00'
             }),
           ),
+          Box(
+            {
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 2,
+              height:1
+            },
+            portfolioTotal,
+          ),
           // Right side: Currency toggle + Status indicator
           Box(
             {
@@ -1030,6 +992,11 @@ export class TerminalRenderer {
               alignItems: 'center',
               gap: 2
             },
+            Text({
+              content: `🔍 Search Stocks`,
+              fg: '#FFFF00',
+              onMouseDown: () => this.openSearchDialog()
+            }),
             Text({
               content: `💰 ${this.displayCurrency}`,
               fg: '#FFFF00',
@@ -1093,7 +1060,7 @@ export class TerminalRenderer {
     const headerRow = this.createTableHeader();
     
     // Create scrollable stock rows with zebra striping and purchase panels
-    const rows: any[] = [];
+    const rows = [];
     
     // Show empty state message inside the table
     if (stocks.length === 0) {
@@ -1105,7 +1072,7 @@ export class TerminalRenderer {
             alignItems: 'center',
             justifyContent: 'center',
             paddingTop: 2,
-            paddingBottom: 2
+            paddingBottom: 2,
           },
           Text({
             content: '📊 No stocks in portfolio',
@@ -1193,7 +1160,7 @@ export class TerminalRenderer {
     const position = this.getPosition(stock.symbol);
     const stockCurrency = stock.price.currency;
     const nativeSymbol = this.getNativeCurrencySymbol(stockCurrency);
-    const displaySymbol = this.getDisplayCurrencySymbol(stockCurrency);
+    const displaySymbol = this.getDisplayCurrencySymbol();
     
     // Price column: show native price with native symbol (NOT converted)
     const nativePrice = stock.price.amount;
@@ -1282,7 +1249,7 @@ export class TerminalRenderer {
     );
   }
 
-  private createPurchaseHistoryPanel(symbol: string): any {
+  private createPurchaseHistoryPanel(symbol: string) {
     const position = this.getPosition(symbol);
     if (!position || !this.expandedSymbols.has(symbol)) {
       return null;
@@ -1290,14 +1257,9 @@ export class TerminalRenderer {
 
     const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
     const convertedPrice = stock ? stock.price.amount : 0;
-    const displaySymbol = this.getDisplayCurrencySymbol(this.displayCurrency);
-    
-    // Convert each transaction's native price to display currency for P&L calculation
-    const transactionsWithNativePrices = position.transactions.map(t => ({
-      ...t,
-      // pricePerShare: this.convertPrice(t.pricePerShare, t.currency)
-    }));
-    const transactionsWithPL = calculateTransactionsWithPL(transactionsWithNativePrices, convertedPrice);
+    const displaySymbol = this.getDisplayCurrencySymbol();
+        
+    const transactionsWithPL = calculateTransactionsWithPL(position.transactions, convertedPrice);
 
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -1331,7 +1293,7 @@ export class TerminalRenderer {
           flexDirection: 'row',
           paddingLeft: 2,
           backgroundColor: isSelected ? '#553300' : 'transparent',
-          onMouseDown: (e: any) => {
+          onMouseDown: (e: MouseEvent) => {
             e.stopPropagation();
             this.selectedTransactionId = isSelected ? null : t.id;
             this.expandedTransactionSymbol = symbol;
@@ -1348,7 +1310,7 @@ export class TerminalRenderer {
         Box(
           { 
             width: 3,
-            onMouseDown: (e: any) => {
+            onMouseDown: (e: MouseEvent) => {
               e.stopPropagation();
               this.openDeleteTransactionDialog(symbol, t.id);
             }
@@ -1459,8 +1421,6 @@ export class TerminalRenderer {
         this.searchPanel.destroy();
         this.searchPanel = null;
       }
-      
-      console.log('🧹 Renderer cleaned up');
     }
   }
 
@@ -1544,10 +1504,9 @@ export class TerminalRenderer {
         
         totalValue += convertedValue;
         totalInvested += convertedInvested;
-        
-        debugLog(`Portfolio: ${position.symbol} - ${summary.currentValue} ${stockCurrency} → ${convertedValue} ${this.displayCurrency}`);
+                
       } catch (error) {
-        console.warn(`⚠️ Skipping ${position.symbol} in portfolio total due to currency conversion error:`, error);
+        debugLog(`⚠️ Skipping ${position.symbol} in portfolio total due to currency conversion error: ${error}`);
         // Skip this position rather than crash the entire portfolio calculation
         // This could happen if exchange rates are missing or stale
       }
@@ -1676,6 +1635,21 @@ export class TerminalRenderer {
     this.dialogMessage = '';
     this.selectedTransactionId = null;
     this.expandedTransactionSymbol = null;
+    
+    // Note: Search dialog state is preserved (query, results) per requirements
+    
+    this.renderWithCurrentStatus();
+  }
+
+  openSearchDialog(): void {
+    this.dialogMode = 'search';
+    this.dialogJustOpened = true; // Prevent 'f' key from being typed into search input
+    // Initialize search panel if needed (but preserve existing state)
+    this.renderWithCurrentStatus();
+  }
+
+  closeSearchDialog(): void {
+    this.dialogMode = 'none';
     this.renderWithCurrentStatus();
   }
 
@@ -1685,7 +1659,7 @@ export class TerminalRenderer {
     this.renderWithCurrentStatus();
   }
 
-  createDeleteConfirmDialog(): any {
+  createDeleteConfirmDialog() {
     const symbol = this.dialogSymbol;
 
     return Box(
@@ -1710,7 +1684,7 @@ export class TerminalRenderer {
             width: 10,
             height: 1,
             backgroundColor: '#440000',
-            onMouseDown: (e: any) => { e.stopPropagation(); this.handleDeleteBySymbol(symbol); this.closeDialog(); }
+            onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.handleDeleteBySymbol(symbol); this.closeDialog(); }
           },
           Text({ content: ' [Enter] ', fg: '#FF4444', width: 10 })
         ),
@@ -1719,7 +1693,7 @@ export class TerminalRenderer {
             width: 10,
             height: 1,
             backgroundColor: '#004400',
-            onMouseDown: (e: any) => { e.stopPropagation(); this.closeDialog(); }
+            onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.closeDialog(); }
           },
           Text({ content: ' [Esc]  ', fg: '#44FF44', width: 10 })
         )
@@ -1746,7 +1720,7 @@ export class TerminalRenderer {
     this.renderWithCurrentStatus();
   }
 
-  createDeleteTransactionDialog(): any {
+  createDeleteTransactionDialog() {
     const symbol = this.dialogTransactionSymbol;
 
     return Box(
@@ -1807,9 +1781,10 @@ export class TerminalRenderer {
     this.renderWithCurrentStatus();
   }
 
-  createHelpDialog(): any {
+  createHelpDialog() {
     const shortcuts = [
       { key: '↑ / ↓ or Click', action: 'Navigate stocks' },
+      { key: 'f', action: 'Search stocks' },
       { key: 'b', action: 'Buy dialog (stock selected)' },
       { key: 's', action: 'Sell dialog (stock selected)' },
       { key: 'd', action: 'Delete confirmation (stock selected)' },
@@ -1848,13 +1823,13 @@ export class TerminalRenderer {
       ]),
       Box({ width: '100%', height: 1 }),
       Box(
-        { width: dialogWidth, flexDirection: 'row', justifyContent: 'center' },
+        { width: dialogWidth, flexDirection: 'row', justifyContent: 'center'},
         Box(
           {
             width: 12,
             height: 1,
             backgroundColor: '#004400',
-            onMouseDown: (e: any) => { e.stopPropagation(); this.closeDialog(); }
+            onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.closeDialog(); }
           },
           Text({ content: ' [Esc] Close ', fg: '#44FF44', width: 12 })
         )
@@ -1882,10 +1857,10 @@ export class TerminalRenderer {
     const qty = parseInt(this.dialogQty, 10);
     const userEnteredPrice = parseFloat(this.dialogPrice);
 
-    if (isNaN(qty) || qty <= 0) {
+    if (Number.isNaN(qty) || qty <= 0) {
       return;
     }
-    if (isNaN(userEnteredPrice) || userEnteredPrice <= 0) {
+    if (Number.isNaN(userEnteredPrice) || userEnteredPrice <= 0) {
       return;
     }
 
@@ -1916,10 +1891,10 @@ export class TerminalRenderer {
     const qty = parseInt(this.dialogQty, 10);
     const userEnteredPrice = parseFloat(this.dialogPrice);
 
-    if (isNaN(qty) || qty <= 0) {
+    if (Number.isNaN(qty) || qty <= 0) {
       return;
     }
-    if (isNaN(userEnteredPrice) || userEnteredPrice <= 0) {
+    if (Number.isNaN(userEnteredPrice) || userEnteredPrice <= 0) {
       return;
     }
 
@@ -1983,7 +1958,33 @@ export class TerminalRenderer {
     this.renderWithCurrentStatus();
   }
 
-  private createTransactionDialog(): any {
+  private createSearchDialog(): any {
+    if (this.dialogMode !== 'search') return null;
+
+    // Use the existing SearchPanel but render it in dialog context
+    const searchPanelContent = this.searchPanel ? this.searchPanel.render(true) : null;
+
+    if (!searchPanelContent) {
+      return Box(
+        {
+          id: 'search-dialog-fallback',
+          width: 76,
+          height: 12,
+          flexDirection: 'column',
+          borderStyle: 'double',
+          borderColor: '#00AAFF',
+          backgroundColor: '#08081a',
+          padding: 1,
+          zIndex: 100
+        },
+        Text({ content: '🔍 Search not available', fg: '#FF6666' })
+      );
+    }
+
+    return searchPanelContent;
+  }
+
+  private createTransactionDialog() {
     if (this.dialogMode === 'none' || this.dialogMode === 'portfolioGraph') return null;
 
     const isBuy = this.dialogMode === 'buy';
@@ -1992,10 +1993,10 @@ export class TerminalRenderer {
     const titleColor = isBuy ? '#00FF88' : '#FF6666';
     const loading = this.dialogFetchingPrice;
 
-    const qtyInput = Input({ width: 10, maxLength: 8, placeholder: '0', value: this.dialogQty });
+    const qtyInput = Input({ width: 10, maxLength: 8, placeholder: '0', value: this.dialogQty, id: 'transaction-quantity-input' });
+    qtyInput.focus();
     qtyInput.on(InputRenderableEvents.INPUT, (value: string) => { this.dialogQty = value; });
     // TODO: currently 
-    // qtyInput.focus();
 
     const priceInput = Input({ width: 12, maxLength: 10, placeholder: '0.00', value: this.dialogPrice });
     priceInput.on(InputRenderableEvents.INPUT, (value: string) => { this.dialogPrice = value; });
@@ -2096,7 +2097,7 @@ export class TerminalRenderer {
             width: 9,
             height: 1,
             backgroundColor: '#440000',
-            onMouseDown: (e: any) => { e.stopPropagation(); this.closeDialog(); }
+            onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.closeDialog(); }
           },
           Text({ content: ' [Cancel] ', width: 9, fg: '#FF4444' })
         ),
@@ -2105,7 +2106,7 @@ export class TerminalRenderer {
             width: 9,
             height: 1,
             backgroundColor: okBtnBg,
-            onMouseDown: loading ? undefined : ((e: any) => { e.stopPropagation(); isBuy ? this.confirmBuy() : this.confirmSell(); })
+            onMouseDown: loading ? undefined : ((e: MouseEvent) => { e.stopPropagation(); isBuy ? this.confirmBuy() : this.confirmSell(); })
           },
           Text({ content: okBtnText, width: 9, fg: okBtnFg })
         )
@@ -2156,7 +2157,7 @@ export class TerminalRenderer {
     this.renderWithCurrentStatus();
   }
 
-  private createPortfolioGraphDialog(): any {
+  private createPortfolioGraphDialog() {
     if (this.dialogMode !== 'portfolioGraph') return null;
 
     const titleColor = '#00BFFF';
@@ -2180,13 +2181,13 @@ export class TerminalRenderer {
           width: 4,
           height: 1,
           backgroundColor: bg,
-          onMouseDown: (e: any) => { e.stopPropagation(); this.changeGraphRange(r.key); }
+          onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.changeGraphRange(r.key); }
         },
         Text({ content: r.label, width: 4, fg })
       );
     });
 
-    const chartContent: any[] = [];
+    const chartContent = [];
 
     if (this.graphLoading) {
       chartContent.push(
@@ -2200,10 +2201,10 @@ export class TerminalRenderer {
       const changeColor = this.graphData.change >= 0 ? '#00FF00' : '#FF0000';
       const changeSign = this.graphData.change >= 0 ? '+' : '';
       // Use dynamic currency symbol instead of hard-coded EUR
-      const displaySymbol = this.getDisplayCurrencySymbol(this.displayCurrency);
+      const displaySymbol = this.getDisplayCurrencySymbol();
 
       chartContent.push(
-        ...chartResult.lines.map((line, rowIdx) =>
+        ...chartResult.lines.map((line) =>
           Box(
             { width: '100%', flexDirection: 'row', justifyContent: 'center' },
             Text({ content: line, fg: '#00FF00' })
@@ -2267,7 +2268,7 @@ export class TerminalRenderer {
             width: 10,
             height: 1,
             backgroundColor: '#440000',
-            onMouseDown: (e: any) => { e.stopPropagation(); this.closePortfolioGraphDialog(); }
+            onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.closePortfolioGraphDialog(); }
           },
           Text({ content: '  [Close]  ', width: 10, fg: '#FF4444' })
         )

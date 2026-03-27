@@ -175,7 +175,7 @@ export class SearchPanel {
   /**
    * Render the complete search panel UI
    */
-  render(shouldFocus: boolean = true): any {
+  render(shouldFocus: boolean = true) {
     if (!this.state.visible) return null;
 
     debugLog('Rendering search panel');
@@ -217,12 +217,12 @@ export class SearchPanel {
         borderStyle: 'single',
         borderColor: '#666666',
         backgroundColor: '#000000',
-        paddingLeft: 1,        
+        paddingLeft: 1,
       }, 
       // Search input
       inputComponent,
       ),
-      // Results table  
+      // Results table
       tableComponent
     );
 

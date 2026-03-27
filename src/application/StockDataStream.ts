@@ -149,18 +149,14 @@ export class StockDataStream {
    */
   public start(): Observable<MarketData> {
     if (this.isStarted) {
-      console.log('📊 Data stream already started');
       return this.marketData$;
     }
 
-    console.log('🚀 Starting stock data stream...');
     this.isStarted = true;
     this.retryCount = 0;
     this.initialLoadComplete = false;
 
     if (this.apiClient.symbols.length === 0) {
-      console.log('📭 No symbols configured, emitting empty market data');
-      const { Stock } = require('../domain/index.js');
       const emptyMarketData = new (require('../domain/index.js').MarketData)([], new Date(), true, '');
       this.marketDataSubject.next(emptyMarketData);
       this.loadingSubject.next(false);
@@ -176,7 +172,6 @@ export class StockDataStream {
     // Create initial load stream
     const initialLoad$ = of(0).pipe(
       tap(() => {
-        console.log('📊 Performing initial data load...');
         this.loadingSubject.next(true);
         this.errorSubject.next(null);
       }),
@@ -187,9 +182,7 @@ export class StockDataStream {
         }
         this.retryCount = 0;
         this.initialLoadComplete = true;
-        console.log('✅ Initial data load completed successfully');
         const marketData = this.transformationService.transformToMarketData(response.data);
-        console.log(`[STREAM] Transformed to MarketData with ${marketData.stocks.length} stocks`);
         return marketData;
       }),
       tap(() => {
@@ -197,7 +190,6 @@ export class StockDataStream {
         this.connectionStatusSubject.next(true);
       }),
       catchError(error => {
-        console.error('🔥 Initial load error:', error);
         this.loadingSubject.next(false);
         this.errorSubject.next(error.message);
         this.connectionStatusSubject.next(false);
@@ -205,11 +197,9 @@ export class StockDataStream {
         this.retryCount++;
         
         if (this.retryCount >= this.maxRetries) {
-          console.error(`❌ Max retries (${this.maxRetries}) reached. Stopping stream.`);
           this.isStarted = false;
           return of(null);
         } else {
-          console.log(`🔄 Retry ${this.retryCount}/${this.maxRetries}...`);
           // Return EMPTY to skip this cycle but allow retry
           return EMPTY;
         }
@@ -222,7 +212,6 @@ export class StockDataStream {
       interval(this.refreshIntervalMs).pipe(
         filter(() => this.initialLoadComplete), // Only start after initial load
         tap(() => {
-          console.log('🔄 Performing live update...');
           this.loadingSubject.next(true);
           this.errorSubject.next(null);
         }),
@@ -249,7 +238,6 @@ export class StockDataStream {
               const previousStock = previousStocksMap.get(symbol);
               if (previousStock) {
                 mergedStocks.push(previousStock);
-                console.log(`  ↩️ ${symbol}: keeping cached price (${previousStock.price.amount})`);
                 missingCount++;
               } else {
                 // Symbol is tracked but never successfully fetched - try one more time
@@ -258,10 +246,7 @@ export class StockDataStream {
               }
             }
           }
-          
-          if (missingCount > 0) {
-            console.log(`⚠️ ${missingCount} stocks restored from cache`);
-          }
+
           
           // Handle completely missing stocks (never fetched successfully)
           // These are tracked symbols that have no cached data
@@ -273,8 +258,7 @@ export class StockDataStream {
           }
           
           // Even if API returned no data, use cached data for tracked symbols
-          if (mergedStocks.length === 0 && previousData && previousData.stocks.length > 0) {
-            console.log('⚠️ API returned no data, using full cache');
+          if (mergedStocks.length === 0 && previousData && previousData.stocks.length > 0) {            
             return previousData;
           }
           

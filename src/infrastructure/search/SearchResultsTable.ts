@@ -40,7 +40,7 @@ export class SearchResultsTable {
    * Create the complete results table structure
    * This is created once and never recreated
    */
-  createTable(): any {
+  createTable() {
     debugLog('Creating search results table structure');
 
     this.tableContainer = Box({
@@ -66,7 +66,7 @@ private createScrollableResults() {
     {
       id: 'search-results-scroll',
       width: '100%',
-      height: 3,
+      height: 8,
       scrollY: true,
       scrollX: false,
       viewportCulling: false,
@@ -85,14 +85,14 @@ private createScrollableResults() {
     return Box({
       id: 'no-results-row',
       width: '100%',
-      height: 4,
+      height: 8,
       justifyContent: 'center',
       alignItems: 'center',
       padding: 1,
       backgroundColor: '#1a1a1a'
     },
       Text({ 
-        content: 'No results yet', 
+        content: 'No results yet',
         fg: '#888888' 
       })
     );
@@ -188,7 +188,7 @@ private createScrollableResults() {
     this.selectedIndex = -1;
   }
 
-  private getContentRows(): any[] {
+  private getContentRows() {
     if (this.isSearching && this.results.length === 0) {
       return [this.createSearchingRow()];
     }

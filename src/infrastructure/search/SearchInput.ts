@@ -22,10 +22,11 @@ export class SearchInput {
    * Required because clearScreen() unmounts the previous instance — OpenTUI
    * cannot re-add an already-unmounted component to a new tree.
    */
-  render(currentValue: string, shouldFocus: boolean = true): any {
+  render(currentValue: string, shouldFocus: boolean = true) {
     this.inputComponent = Input({
       placeholder: 'Type to search stocks...',
       width: '100%',
+      id: 'search-input'
     });
 
     this.inputComponent.on(InputRenderableEvents.INPUT, (value: string) => {
@@ -45,7 +46,7 @@ export class SearchInput {
     }
 
     if (this.inputComponent && shouldFocus) {
-      this.inputComponent.focus();      
+      this.inputComponent.focus();
       if (currentValue) {
         this.inputComponent.gotoLineEnd();
       }
