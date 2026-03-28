@@ -375,8 +375,7 @@ export class YahooFinanceClient {
 
       this.exchangeRateCache.set(cacheKey, rate);
       this.exchangeRateTimestamp = now;
-      
-      console.log(`💱 Exchange rate ${from}->${to}: ${rate.toFixed(4)}`);
+
       return rate;
     } catch (error) {
       console.error(`Failed to fetch exchange rate ${from}->${to}:`, error);
