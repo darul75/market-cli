@@ -1,4 +1,4 @@
-import { createCliRenderer, Box, Text, type CliRenderer, ScrollBox, Input, InputRenderableEvents, KeyEvent, MouseEvent } from '@opentui/core';
+import { createCliRenderer, Box, Text, type CliRenderer, ScrollBox, Input, InputRenderableEvents, MouseEvent, ScrollBoxRenderable, BoxRenderable } from '@opentui/core';
 import type { Stock, MarketData, Position, Transaction } from '../domain/index.js';
 import { calculatePositionSummary, calculateTransactionsWithPL } from '../domain/PositionCalculator.js';
 import type { AppStatus, SearchService, StockDataStream } from '../application/index.js';
@@ -8,6 +8,7 @@ import { HistoricalPriceService } from './HistoricalPriceService.js';
 import { PortfolioHistoryService, type PortfolioHistorySummary } from './PortfolioHistoryService.js';
 import { AsciiChart } from './AsciiChart.js';
 import { YahooFinanceClient } from './YahooFinanceClient.js';
+import { getNativeCurrencySymbol } from '../shared/CurrencyUtils.js';
 
 const APP_VERSION = '0.3.3';
 
@@ -49,6 +50,7 @@ export class TerminalRenderer {
   private resizeTimeout?: NodeJS.Timeout; // For debounced resize handling
   private selectedIndex: number = -1; // Currently selected row (-1 = none)
   private selectedSymbol: string | null = null; // Currently selected stock symbol
+  private scrollPosition = 0;
   private marketData: MarketData | null = null; // Cache for re-rendering
   private currentStatus: AppStatus | null = null; // Cache current status for re-rendering
   
@@ -60,6 +62,7 @@ export class TerminalRenderer {
   private portfolioStore: PortfolioStore = new PortfolioStore();
   private historicalPriceService: HistoricalPriceService = new HistoricalPriceService();
   private dataStream: StockDataStream | null = null;
+  private scrollableContent: any;
 
   public setDataStream(dataStream: StockDataStream): void {
     this.dataStream = dataStream;
@@ -124,21 +127,6 @@ export class TerminalRenderer {
     return this.displayCurrency === 'EUR' ? '€' : '$';
   }
 
-  private getNativeCurrencySymbol(currency: string): string {
-    switch (currency) {
-      case 'AUD': return '$';
-      case 'CAD': return '$';
-      case 'CHF': return 'Fr';
-      case 'CLP': return '$';
-      case 'EUR': return '€';
-      case 'GBP': return '£';
-      case 'JPY': return '¥';
-      case 'MXN': return '$';
-      case 'USD': return '$';
-      default: return currency;
-    }
-  }
-
   public toggleCurrency(): void {
     this.displayCurrency = this.displayCurrency === 'USD' ? 'EUR' : 'USD';
     
@@ -201,9 +189,6 @@ export class TerminalRenderer {
     return this.dialogMode !== 'none';
   }
 
-  /**
-   * Initialize the renderer
-   */
   async initialize(): Promise<void> {
     try {
       this.renderer = await createCliRenderer({
@@ -356,10 +341,7 @@ export class TerminalRenderer {
     }
   }
 
-  /**
-   * Set up terminal resize event handling
-   */
-  private setupResizeHandling(): void {
+  private setupResizeHandling() {
     // Listen for terminal resize events if available
     if (process.stdout && process.stdout.on) {
       process.stdout.on('resize', this.handleResize);
@@ -371,10 +353,7 @@ export class TerminalRenderer {
     }
   }
 
-  /**
-  /**
-   * Handle debounced terminal resize events
-   */
+
   private handleResize = () => {
     if (this.resizeTimeout) {
       clearTimeout(this.resizeTimeout);
@@ -405,9 +384,6 @@ export class TerminalRenderer {
     // For now, it's a placeholder for relative position restoration
   }
 
-  /**
-   * Clear the screen by removing all children from the root
-   */
   private clearScreen(): void {
     if (!this.isInitialized) return;
     
@@ -439,9 +415,11 @@ export class TerminalRenderer {
     if (this.selectedIndex === index) {
       this.selectedIndex = -1;
       this.selectedSymbol = null;
+      this.scrollPosition = this.scrollableContent.verticalScrollBar.scrollPosition;
     } else {
       this.selectedIndex = index;
       this.selectedSymbol = stock.symbol;
+      this.scrollPosition = this.scrollableContent.verticalScrollBar.scrollPosition;
     }
     
     // Re-render with cached status (preserves timestamp)
@@ -461,6 +439,7 @@ export class TerminalRenderer {
       this.selectedIndex = this.selectedIndex - 1;
     }
     this.selectedSymbol = this.marketData!.stocks[this.selectedIndex].symbol;
+
     this.renderWithCurrentStatus();
   }
 
@@ -479,6 +458,7 @@ export class TerminalRenderer {
       this.selectedIndex = this.selectedIndex + 1;
     }
     this.selectedSymbol = this.marketData!.stocks[this.selectedIndex].symbol;
+
     this.renderWithCurrentStatus();
   }
 
@@ -609,6 +589,13 @@ export class TerminalRenderer {
     // Adjust selection if needed
     if (this.selectedIndex >= this.marketData!.stocks.length) {
       this.selectedIndex = Math.max(0, this.marketData!.stocks.length - 1);
+    }
+
+    if (this.marketData!.stocks.length > 0 && this.selectedIndex >= 0) {
+      this.selectedSymbol = this.marketData!.stocks[this.selectedIndex].symbol;
+    } else {
+      this.selectedSymbol = null;
+      this.selectedIndex = -1;
     }
     
     this.savePortfolio();
@@ -756,6 +743,12 @@ export class TerminalRenderer {
           this.dialogMode === 'portfolioGraph' ? this.createPortfolioGraphDialog() : this.createTransactionDialog()
         )
       );
+    }
+
+    if (this.selectedIndex > 0) {
+      setTimeout(() => {
+        this.scrollableContent.scrollBy(this.scrollPosition, "absolute");
+      }, 0);
     }
   }
 
@@ -1080,22 +1073,24 @@ export class TerminalRenderer {
     
     // Show empty state message inside the table
     if (stocks.length === 0) {
-      rows.push(
-        Box(
+      const box = new BoxRenderable(this.renderer,
           {
             width: '100%',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
+            height: 1,
             paddingTop: 2,
             paddingBottom: 2,
-          },
-          Text({
+          });
+
+      box.add(Text({
             content: '📊 No stocks in portfolio',
             fg: '#00FFFF',
             width: 30
-          })
-        )
+          }))
+      rows.push(
+        box
       );
     } else {
       stocks.forEach((stock, index) => {
@@ -1110,18 +1105,20 @@ export class TerminalRenderer {
       });
     }
 
-    // Create scrollable container for stock rows
-    const scrollableContent = ScrollBox(
+    this.scrollableContent = new ScrollBoxRenderable(this.renderer,
       {
         width: '100%',
-        flexGrow: 1, // Take all available vertical space
-        minHeight: 3, // Minimum 3 rows for small terminals
+        flexGrow: 1,
+        minHeight: 3,
         scrollY: true,
         scrollX: false,
-        viewportCulling: true // Performance optimization for large lists
+        viewportCulling: true
       },
-      ...rows
     );
+
+    rows.forEach((row) => {
+      this.scrollableContent.add(row);
+    })
 
     return Box(
       {
@@ -1132,7 +1129,7 @@ export class TerminalRenderer {
         flexGrow: 1
       },
       headerRow,
-      scrollableContent
+      this.scrollableContent
     );
   }
 
@@ -1179,7 +1176,7 @@ export class TerminalRenderer {
     const symbolColor = isSelected ? '#00FFFF' : '#00BFFF';
     const position = this.getPosition(stock.symbol);
     const stockCurrency = stock.price.currency;
-    const nativeSymbol = this.getNativeCurrencySymbol(stockCurrency);
+    const nativeSymbol = getNativeCurrencySymbol(stockCurrency);
     const displaySymbol = this.getDisplayCurrencySymbol();
     
     // Price column: show native price with native symbol (NOT converted)
@@ -1302,7 +1299,7 @@ export class TerminalRenderer {
       // Get original transaction currency and symbol
       const originalTransaction = position.transactions.find(orig => orig.id === t.id);
       const origCurrency = originalTransaction?.currency || 'USD';
-      const origSymbol = this.getNativeCurrencySymbol(origCurrency);
+      const origSymbol = getNativeCurrencySymbol(origCurrency);
       
       // Price: show original price in original currency (NOT converted)
       const originalPrice = originalTransaction?.pricePerShare || t.pricePerShare;

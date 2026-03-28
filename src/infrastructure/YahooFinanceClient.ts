@@ -395,7 +395,7 @@ export class YahooFinanceClient {
    */
   async fetchExchangeRatesToUSD(): Promise<Map<string, number>> {
     const rates = new Map<string, number>();
-    const currencies = ['EUR', 'JPY', 'GBP', 'CHF', 'CAD', 'AUD', 'MXN', 'CLP', 'THB'];
+    const currencies = ['EUR', 'GBp', 'JPY', 'GBP', 'CHF', 'CAD', 'AUD', 'MXN', 'CLP', 'THB', 'USX'];
     
     for (const currency of currencies) {
       try {
