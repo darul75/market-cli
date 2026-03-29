@@ -4,13 +4,6 @@ import { SearchInput } from './SearchInput.js';
 import { SearchResultsTable } from './SearchResultsTable.js';
 import type { SearchResult } from '../../domain/SearchResult.js';
 import type { SearchService } from '../../application/SearchService.js';
-import * as fs from 'fs';
-
-function debugLog(msg: string): void {
-  try {
-    fs.appendFileSync('/tmp/market-cli-debug.log', `[${new Date().toISOString()}] SearchPanel: ${msg}\n`);
-  } catch {}
-}
 
 interface SearchPanelState {
   visible: boolean;
@@ -39,13 +32,12 @@ export class SearchPanel {
     private onClose: () => void,
     private onRequestRerender: () => void,
     private onMouseOver: () => void,
-    private onTyping: () => void,
   ) {
     this.searchService = searchService;
 
     this.searchInput = new SearchInput(searchService, (value) => {
       this.state.query = value;
-    }, this.onTyping);
+    });
 
     this.resultsTable = new SearchResultsTable(onAddStock);
 

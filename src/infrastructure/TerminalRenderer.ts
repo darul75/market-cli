@@ -10,7 +10,7 @@ import { AsciiChart } from './AsciiChart.js';
 import { YahooFinanceClient } from './YahooFinanceClient.js';
 import { getNativeCurrencySymbol } from '../shared/CurrencyUtils.js';
 
-const APP_VERSION = '0.3.4';
+const APP_VERSION = '0.3.5';
 
 const HEADER_WIDTH_SYMBOL = 12;
 const HEADER_WIDTH_PRICE = 12;
@@ -611,11 +611,6 @@ export class TerminalRenderer {
     return this.selectedSymbol;
   }
 
-  public clearSelection(): void {
-    this.selectedIndex = -1;
-    this.selectedSymbol = null;
-  }
-
   public setupSearchService(searchService: SearchService, onAddStock: (symbol: string, name: string) => void) {
     this.searchPanel = new SearchPanel(
       searchService,
@@ -623,7 +618,6 @@ export class TerminalRenderer {
       () => {}, // Close callback
       () => this.renderWithCurrentStatus(),
       () => {},
-      () => this.clearSelection()
     );
   }
 
@@ -721,7 +715,7 @@ export class TerminalRenderer {
       );
     }
 
-    if (this.selectedIndex > 0) {
+    if (this.selectedIndex > 0 && this.dialogMode === 'none') {
       setTimeout(() => {
         this.scrollableContent.scrollBy(this.scrollPosition, "absolute");
       }, 0);
@@ -1076,7 +1070,7 @@ export class TerminalRenderer {
 
     rows.forEach((row) => {
       this.scrollableContent.add(row);
-    })
+    });
 
     return Box(
       {
@@ -1188,8 +1182,8 @@ export class TerminalRenderer {
         alignItems: 'center',
         backgroundColor,
         focusable: true,
-        marginLeft: 1,
-        marginRight: 1,
+        paddingLeft: 1,
+        paddingRight:1,
         onMouseDown: (event) => {
           if (this.dialogMode !== 'none') return;
           if (event.button === 0) {
@@ -1331,7 +1325,8 @@ export class TerminalRenderer {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginLeft: 1
+        marginLeft: 1,
+        paddingRight: 1,
       },
       Text({
         content: lastUpdate,
@@ -1386,7 +1381,6 @@ export class TerminalRenderer {
 
   async loadPortfolio(): Promise<Position[]> {
     this.positions = await this.portfolioStore.load();
-    console.log(`📂 Loaded ${this.positions.length} positions from portfolio`);
     return this.positions;
   }
 

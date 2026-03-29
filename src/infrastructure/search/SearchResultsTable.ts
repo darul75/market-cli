@@ -40,14 +40,11 @@ export class SearchResultsTable {
   }
 
   private createScrollableResults() {
-    return ScrollBox(
+    return Box(
       {
-        id: 'search-results-scroll',
+        id: 'search-results',
         width: '100%',
         height: 8,
-        scrollY: true,
-        scrollX: false,
-        viewportCulling: false,
         flexShrink: 0
       },
       ...this.getContentRows()
@@ -156,7 +153,7 @@ export class SearchResultsTable {
   }
 
   addStockResult() {
-    if (this.selectedIndex > 0) {
+    if (this.selectedIndex >= 0) {
       const result = this.results[this.selectedIndex];
       
       this.onAddStock(result.symbol, result.name);
