@@ -1,2261 +1,1189 @@
-import { createCliRenderer, Box, Text, type CliRenderer, ScrollBox, Input, InputRenderableEvents, MouseEvent, ScrollBoxRenderable, BoxRenderable } from '@opentui/core';
-import type { Stock, MarketData, Position, Transaction } from '../domain/index.js';
-import { calculatePositionSummary, calculateTransactionsWithPL } from '../domain/PositionCalculator.js';
-import type { AppStatus, SearchService, StockDataStream } from '../application/index.js';
-import { SearchPanel } from './search/index.js';
-import { PortfolioStore } from './PortfolioStore.js';
-import { HistoricalPriceService } from './HistoricalPriceService.js';
-import { PortfolioHistoryService, type PortfolioHistorySummary } from './PortfolioHistoryService.js';
-import { AsciiChart } from './AsciiChart.js';
-import { YahooFinanceClient } from './YahooFinanceClient.js';
-import { getNativeCurrencySymbol } from '../shared/CurrencyUtils.js';
+import { createCliRenderer, Box, Text, type CliRenderer, type KeyEvent } from "@opentui/core";
+import type { MarketData, Position, Transaction } from "../domain/index.js";
+import { calculatePositionSummary } from "../domain/PositionCalculator.js";
+import type { AppStatus, SearchService, StockDataStream } from "../application/index.js";
+import { SearchPanel } from "./search/index.js";
+import { PortfolioStore } from "./PortfolioStore.js";
+import { HistoricalPriceService } from "./HistoricalPriceService.js";
+import { PortfolioHistoryService, type PortfolioHistorySummary } from "./PortfolioHistoryService.js";
+import { YahooFinanceClient } from "./YahooFinanceClient.js";
+import { StockPanel } from "./stock/StockPanel.js";
+import { debugLog } from "../shared/Logger.js";
+import { HeaderPanel } from "./layout/HeaderPanel.js";
+import { SummaryPanel } from "./layout/SummaryPanel.js";
+import { FooterPanel } from "./layout/FooterPanel.js";
+import { convertPrice, getNativeCurrencySymbol } from "../shared/CurrencyUtils.js";
+import { DeleteStockDialog } from "./dialog/DeleteStockDialog.js";
+import { HelpDialog } from "./dialog/HelpDialog.js";
+import { DeleteStockTransactionDialog } from "./dialog/DeleteStockTransactionDialog.js";
+import type { Currency, DialogFocusedField, DialogMode, GraphRange, SideEffect } from "./types.js";
+import { TransactionDialog } from "./dialog/TransactionDialog.js";
+import { PortfolioGraphDialog } from "./dialog/PortfolioDialog.js";
+import { type Observable, Subject } from "rxjs";
+import { generateId } from "../shared/Utils.js";
 
-const APP_VERSION = '0.3.5';
+const APP_VERSION = "0.3.6";
 
-const HEADER_WIDTH_SYMBOL = 12;
-const HEADER_WIDTH_PRICE = 12;
-const HEADER_WIDTH_CHANGE = 12;
-const HEADER_WIDTH_QUANTITY = 9;
-const HEADER_WIDTH_INVESTED = 14;
-const HEADER_WIDTH_VALUE = 14;
-
-function debugLog(msg: string): void {
-  try {
-    const fs2 = require('fs');
-    fs2.appendFileSync('/tmp/market-cli-debug.log', `[${new Date().toISOString()}] TerminalRenderer: ${msg}\n`);
-  } catch {}
-}
-
-/**
- * Interface for loading progress information
- */
 export interface LoadingProgress {
-  currentBatch: number;
-  totalBatches: number;
-  completedStocks: number;
-  totalStocks: number;
-  currentBatchStocks: string[];
-  successCount: number;
-  errorCount: number;
-  recentErrors: string[];
-  elapsedTime: number;
+	currentBatch: number;
+	totalBatches: number;
+	completedStocks: number;
+	totalStocks: number;
+	currentBatchStocks: string[];
+	successCount: number;
+	errorCount: number;
+	recentErrors: string[];
+	elapsedTime: number;
 }
 
-/**
- * OpenTUI terminal renderer for the stock monitoring interface
- */
 export class TerminalRenderer {
-  private renderer!: CliRenderer;
-  private isInitialized = false;
-  private resizeTimeout?: NodeJS.Timeout; // For debounced resize handling
-  private selectedIndex: number = -1; // Currently selected row (-1 = none)
-  private selectedSymbol: string | null = null; // Currently selected stock symbol
-  private scrollPosition = 0;
-  private marketData: MarketData | null = null; // Cache for re-rendering
-  private currentStatus: AppStatus | null = null; // Cache current status for re-rendering
-  
-  // Search panel (new architecture)
-  private searchPanel: SearchPanel | null = null;
-
-  // Portfolio tracking
-  private positions: Position[] = [];
-  private portfolioStore: PortfolioStore = new PortfolioStore();
-  private historicalPriceService: HistoricalPriceService = new HistoricalPriceService();
-  private dataStream: StockDataStream | null = null;
-  private scrollableContent: any;
-
-  public setDataStream(dataStream: StockDataStream): void {
-    this.dataStream = dataStream;
-  }
-
-  // Currency display
-  private displayCurrency: 'USD' | 'EUR' = 'USD';
-  private exchangeRates: Map<string, number> = new Map();  // currency -> rate (per USD)
-
-  public async updateExchangeRate(): Promise<void> {
-    let apiClient: YahooFinanceClient;
-    
-    if (this.dataStream) {
-      apiClient = this.dataStream.getApiClient();
-    } else {
-      apiClient = new YahooFinanceClient();
-    }
-    
-    try {
-      this.exchangeRates = await apiClient.fetchExchangeRatesToUSD();
-    } catch (error) {
-      debugLog('updateExchangeRate: error ' + error);
-    }
-  }
-
-  private convertPrice(price: number, fromCurrency: string): number {
-    const toCurrency = this.displayCurrency;
-    
-    if (fromCurrency === toCurrency) {
-      return price;
-    }
-    
-    // Convert to USD first (our base currency)
-    let usdPrice: number;
-    if (fromCurrency === 'USD') {
-      usdPrice = price;
-    } else {
-      const fromRate = this.exchangeRates.get(fromCurrency);
-      if (!fromRate || fromRate <= 0) {
-        debugLog(`Invalid exchange rate for ${fromCurrency}: ${fromRate}`);
-        throw new Error(`Cannot convert from ${fromCurrency} - invalid exchange rate`);
-      }
-      // Rate represents: 1 unit of fromCurrency = fromRate USD
-      usdPrice = price * fromRate;  // FIXED: was price / fromRate
-    }
-    
-    // Convert from USD to target currency
-    if (toCurrency === 'USD') {
-      return usdPrice;
-    } else {
-      const toRate = this.exchangeRates.get(toCurrency);
-      if (!toRate || toRate <= 0) {
-        debugLog(`Invalid exchange rate for ${toCurrency}: ${toRate}`);
-        throw new Error(`Cannot convert to ${toCurrency} - invalid exchange rate`);
-      }
-      // Rate represents: 1 unit of toCurrency = toRate USD
-      return usdPrice / toRate;  // FIXED: was usdPrice * toRate
-    }
-  }
-
-  private getDisplayCurrencySymbol(): string {
-    return this.displayCurrency === 'EUR' ? '€' : '$';
-  }
-
-  public toggleCurrency(): void {
-    this.displayCurrency = this.displayCurrency === 'USD' ? 'EUR' : 'USD';
-    
-    // Refresh portfolio graph if it's currently open
-    if (this.dialogMode === 'portfolioGraph') {
-      this.refreshPortfolioGraph();
-    }
-    
-    this.renderWithCurrentStatus();
-  }
-
-  private async refreshPortfolioGraph(): Promise<void> {
-    if (this.dialogMode !== 'portfolioGraph') return;
-    
-    this.graphLoading = true;
-    this.renderWithCurrentStatus();
-    
-    const positionsWithTransactions = this.positions.filter(p => p.transactions.length > 0);
-    this.graphData = await this.portfolioHistoryService.getPortfolioHistory(
-      positionsWithTransactions, 
-      this.graphSelectedRange,
-      this.displayCurrency,
-      this.marketData,
-      (amount, fromCurrency) => this.convertPrice(amount, fromCurrency)
-    );
-    this.graphLoading = false;
-    this.renderWithCurrentStatus();
-  }
-
-  // Dialog state
-  private dialogMode: 'none' | 'buy' | 'sell' | 'portfolioGraph' | 'delete' | 'help' | 'deleteTransaction' | 'search' = 'none';
-  private dialogSymbol: string = '';
-  private dialogYear: number = new Date().getFullYear();
-  private dialogMonth: number = new Date().getMonth();
-  private dialogDay: number = new Date().getDate();
-  private dialogQty: string = '';
-  private dialogPrice: string = '';
-  private dialogMessage: string = '';
-  private dialogFetchingPrice: boolean = false;
-  private dialogFetchTimer?: NodeJS.Timeout;
-  private dialogTransactionSymbol: string = '';
-  private dialogTransactionId: string = '';
-  private dialogFocusedField: 'monthLt' | 'monthGt' | 'dayLt' | 'dayGt' | 'yearLt' | 'yearGt' | 'qty' | 'price' | 'cancel' | 'ok' = 'monthLt';
-
-  // Portfolio graph state
-  private portfolioHistoryService: PortfolioHistoryService = new PortfolioHistoryService();
-  private graphSelectedRange: '1d' | '5d' | '1mo' | '6mo' | 'ytd' | '1y' | '5y' | 'max' = '1mo';
-  private graphData: PortfolioHistorySummary | null = null;
-  private graphLoading: boolean = false;
-
-  // Expanded purchase history panels
-  private expandedSymbols: Set<string> = new Set();
-  // Selected transaction in expanded panel
-  private selectedTransactionId: string | null = null;
-  private expandedTransactionSymbol: string | null = null;
-
-  isInputFocused(): boolean {
-    return this.dialogMode !== 'none';
-  }
-
-  async initialize(): Promise<void> {
-    try {
-      this.renderer = await createCliRenderer({
-        exitOnCtrlC: true,
-        useMouse: true, // Enable mouse events
-        autoFocus: true, // Focus nearest focusable on left click
-        enableMouseMovement: true // Enable hover tracking
-      });
-
-      this.renderer.prependInputHandler((sequence: string) => {
-        debugLog(sequence);
-
-        if (!this.isInputFocused() && sequence === 'b' && this.selectedSymbol && this.dialogMode === 'none') {
-          const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
-          if (stock) {
-            this.openBuyDialog(this.selectedSymbol);
-          } else {
-            // Clear stale selection
-            this.selectedSymbol = '';
-            this.selectedIndex = -1;
-          }
-
-          return true;
-        }
-
-        // 's' opens sell dialog
-        if (!this.isInputFocused() && sequence === 's' && this.selectedSymbol && this.dialogMode === 'none') {
-          const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
-          if (stock) {
-            const pos = this.calculatePositionSummary(this.selectedSymbol, 0);
-            if (pos.qty > 0) {
-              this.openSellDialog(this.selectedSymbol);
-            }
-          } else {
-            // Clear stale selection
-            this.selectedSymbol = '';
-            this.selectedIndex = -1;
-          }
-
-          return true;
-        }
-
-        // 'o' toggles transaction history panel (expanded view)
-        if (!this.isInputFocused() && sequence === 'o' && this.selectedSymbol && this.dialogMode === 'none') {
-          if (this.expandedSymbols.has(this.selectedSymbol)) {
-            this.expandedSymbols.delete(this.selectedSymbol);
-          } else {
-            this.expandedSymbols.add(this.selectedSymbol);
-          }
-          this.renderWithCurrentStatus();
-
-          return true;
-        }
-
-        // 'd' opens delete confirmation dialog
-        if (!this.isInputFocused() && sequence === 'd' && this.selectedSymbol && this.dialogMode === 'none') {
-          const stock = this.marketData?.stocks.find(s => s.symbol === this.selectedSymbol);
-          if (stock) {
-            this.openDeleteConfirmDialog(this.selectedSymbol);
-          } else {
-            this.selectedSymbol = '';
-            this.selectedIndex = -1;
-          }
-          return true;
-        }
-
-        // 'h' opens help dialog
-        if (!this.isInputFocused() && sequence === 'h' && this.dialogMode === 'none') {
-          this.openHelpDialog();
-          return true;
-        }
-
-        // 'f' opens search dialog
-        if (!this.isInputFocused() && sequence === 'f' && this.dialogMode === 'none') {
-          this.openSearchDialog();
-          return true;
-        }
-
-        // 'c' toggles currency
-        if (!this.isInputFocused() && sequence === 'c' && this.dialogMode === 'none') {
-          this.toggleCurrency();
-          return true;
-        }
-
-        // 'x' deletes selected transaction
-        if (!this.isInputFocused() && sequence === 'x' && this.selectedTransactionId && this.dialogMode === 'none' && this.expandedTransactionSymbol) {
-          this.openDeleteTransactionDialog(this.expandedTransactionSymbol, this.selectedTransactionId);
-          return true;
-        }
-
-        return false;
-      });
-
-      // Use keyInput EventEmitter to capture keyboard events
-      (this.renderer as any).keyInput?.on('keypress', (key: any) => {
-                
-        if (key.name === 'escape' && this.dialogMode !== 'none') {
-          this.closeDialog();
-        }
-
-        if (key.name === 'return' && this.dialogMode === 'search') {
-          this.searchPanel?.addStock();
-        }
-
-        if (key.name === 'return' && this.dialogMode === 'buy') {
-          this.confirmBuy();
-        }
-        if (key.name === 'return' && this.dialogMode === 'sell') {
-          this.confirmSell();
-        }
-        if (key.name === 'return' && this.dialogMode === 'delete') {
-          this.confirmDelete();
-        }
-        if (key.name === 'return' && this.dialogMode === 'deleteTransaction') {
-          this.confirmDeleteTransaction();
-        }
-
-        // Arrow keys for selection navigation (always work, even in search)
-        if (this.dialogMode === 'none') {
-          if (key.name === 'up') {
-            this.moveSelectionUp();
-          }
-          if (key.name === 'down') {
-            this.moveSelectionDown();
-          }
-        }
-
-        if (this.dialogMode === 'search') {
-          if (key.name === 'up') {
-            this.searchPanel?.moveSelectionUp();
-          }
-          if (key.name === 'down') {
-            this.searchPanel?.moveSelectionDown();
-          }
-        }
-
-        if (this.dialogMode === 'buy' || this.dialogMode === 'sell') {
-          if (key.name === 'left') {
-            this.cycleDialogFocus('left');
-          }
-          if (key.name === 'right') {
-            this.cycleDialogFocus('right');
-          }
-          if (key.name === 'up') {
-            this.incrementFocusedField();
-          }
-          if (key.name === 'down') {
-            this.decrementFocusedField();
-          }
-          if (key.name === 'return') {
-            this.actOnFocusedField();
-          }
-        }
-      });
-
-      this.isInitialized = true;
-      
-      // Set up resize event handling
-      this.setupResizeHandling();
-    } catch (error) {
-      debugLog(`❌ Failed to initialize OpenTUI renderer: ${error}`);
-      throw error;
-    }
-  }
-
-  private setupResizeHandling() {
-    // Listen for terminal resize events if available
-    if (process.stdout && process.stdout.on) {
-      process.stdout.on('resize', this.handleResize);
-    }
-    
-    // Also listen for SIGWINCH (window change) signals
-    if (process.on) {
-      process.on('SIGWINCH', this.handleResize);
-    }
-  }
-
-
-  private handleResize = () => {
-    if (this.resizeTimeout) {
-      clearTimeout(this.resizeTimeout);
-    }
-    
-    this.resizeTimeout = setTimeout(() => {
-      // Preserve relative scroll position during resize
-      this.preserveRelativeScrollPosition();
-      
-      // Restore relative scroll position after resize
-      this.restoreRelativeScrollPosition();
-    }, 300); // 300ms debounce
-  };
-
-  /**
-   * Preserve relative scroll position before resize
-   */
-  preserveRelativeScrollPosition(): void {
-    // This will be enhanced when we have access to actual ScrollBox state
-    // For now, it's a placeholder for relative position calculation
-  }
-
-  /**
-   * Restore relative scroll position after resize  
-   */
-  restoreRelativeScrollPosition(): void {
-    // This will be enhanced when we have access to actual ScrollBox state
-    // For now, it's a placeholder for relative position restoration
-  }
-
-  private clearScreen(): void {
-    if (!this.isInitialized) return;
-    
-    try {
-      // Remove all existing children from the root
-      const children = this.renderer.root.getChildren();
-      for (const child of children) {
-        if (child && child.id) {
-          try {
-            this.renderer.root.remove(child.id);
-          } catch (e) {
-            // Ignore errors removing individual children
-            debugLog('exception removing child')
-          }
-        }
-      }
-    } catch (e) {
-      // Ignore errors during clear
-    }
-
-    this.renderer.focusRenderable(this.renderer.root);
-  }
-
-  /**
-   * Handle row click to toggle selection
-   */
-  private handleRowClick(stock: Stock, index: number): void {
-    // Toggle selection: if already selected, deselect
-    if (this.selectedIndex === index) {
-      this.selectedIndex = -1;
-      this.selectedSymbol = null;
-      this.scrollPosition = this.scrollableContent.verticalScrollBar.scrollPosition;
-    } else {
-      this.selectedIndex = index;
-      this.selectedSymbol = stock.symbol;
-      this.scrollPosition = this.scrollableContent.verticalScrollBar.scrollPosition;
-    }
-    
-    // Re-render with cached status (preserves timestamp)
-    this.renderWithCurrentStatus();
-  }
-
-  /**
-   * Move selection up (previous row)
-   */
-  private moveSelectionUp(): void {
-    const stockCount = this.marketData?.stocks.length || 0;
-    if (stockCount === 0) return;
-
-    if (this.selectedIndex <= 0) {
-      this.selectedIndex = stockCount - 1;
-    } else {
-      this.selectedIndex = this.selectedIndex - 1;
-    }
-    this.selectedSymbol = this.marketData!.stocks[this.selectedIndex].symbol;
-
-    this.renderWithCurrentStatus();
-  }
-
-  /**
-   * Move selection down (next row)
-   */
-  private moveSelectionDown(): void {
-    const stockCount = this.marketData?.stocks.length || 0;
-    if (stockCount === 0) return;
-
-    if (this.selectedIndex < 0) {
-      this.selectedIndex = 0;
-    } else if (this.selectedIndex >= stockCount - 1) {
-      this.selectedIndex = 0;
-    } else {
-      this.selectedIndex = this.selectedIndex + 1;
-    }
-    this.selectedSymbol = this.marketData!.stocks[this.selectedIndex].symbol;
-
-    this.renderWithCurrentStatus();
-  }
-
-  /**
-   * Re-render with cached data and status (preserves timestamp)
-   */
-  private renderWithCurrentStatus(): void {
-    if (this.marketData && this.currentStatus) {
-      this.renderStockTable(this.marketData, this.currentStatus);
-    }
-  }
-
-  /**
-   * Truncate a name string to fit in the column width
-   */
-  private truncateName(name: string, maxLength: number): string {
-    if (name.length <= maxLength) {
-      return name;
-    }
-    return name.substring(0, maxLength - 3) + '...';
-  }
-
-  private createActionButton(
-    symbol: string,
-    color: string,
-    handler: () => void,
-    isVisible: boolean = true,
-    marginLeft: number = 0,
-  ) {
-    if (!isVisible) {
-      // Invisible button (transparent, preserves layout)
-      return Box(
-        {
-          width: 2,
-          height: 1,
-          backgroundColor: 'transparent',
-          marginLeft
-        },
-        Text({ content: ' ', width: 1 })
-      );
-    }
-    
-    // Visible button: colored symbol with click handler
-    return Box(
-      {
-        width: 2,
-        height: 1,
-        marginLeft,
-        onMouseDown: (event) => {
-          event.stopPropagation(); // Prevent row selection handler
-          handler();
-        }
-      },
-      Text({ content: symbol, width: 2, fg: color })
-    );
-  }
-
-  private handleMoveUp(index: number): void {
-    if (index <= 0) return;
-    
-    const stock = this.marketData!.stocks[index];
-    const prevStock = this.marketData!.stocks[index - 1];
-    
-    // Swap in marketData
-    this.marketData!.stocks[index] = prevStock;
-    this.marketData!.stocks[index - 1] = stock;
-    
-    // Sync positions order
-    const stockIdx = this.positions.findIndex(p => p.symbol === stock.symbol);
-    const prevIdx = this.positions.findIndex(p => p.symbol === prevStock.symbol);
-    if (stockIdx > -1 && prevIdx > -1) {
-      [this.positions[stockIdx], this.positions[prevIdx]] = 
-      [this.positions[prevIdx], this.positions[stockIdx]];
-    }
-    
-    this.selectedIndex = index - 1;
-    this.savePortfolio();
-    this.renderWithCurrentStatus();
-  }
-
-  private handleMoveDown(index: number): void {
-    if (index >= this.marketData!.stocks.length - 1) return;
-    
-    const stock = this.marketData!.stocks[index];
-    const nextStock = this.marketData!.stocks[index + 1];
-    
-    // Swap in marketData
-    this.marketData!.stocks[index] = nextStock;
-    this.marketData!.stocks[index + 1] = stock;
-    
-    // Sync positions order
-    const stockIdx = this.positions.findIndex(p => p.symbol === stock.symbol);
-    const nextIdx = this.positions.findIndex(p => p.symbol === nextStock.symbol);
-    if (stockIdx > -1 && nextIdx > -1) {
-      [this.positions[stockIdx], this.positions[nextIdx]] = 
-      [this.positions[nextIdx], this.positions[stockIdx]];
-    }
-    
-    this.selectedIndex = index + 1;
-    this.savePortfolio();
-    this.renderWithCurrentStatus();
-  }
-
-  private handleDelete(index: number): void {
-    const stock = this.marketData!.stocks[index];
-
-    // Remove stock from array
-    this.marketData!.stocks.splice(index, 1);
-
-    this.positions = this.positions.filter(p => p.symbol !== stock.symbol);
-    
-    if (this.dataStream) {
-      this.dataStream.removeSymbol(stock.symbol);
-    }
-    
-    // Adjust selection if needed
-    if (this.selectedIndex >= this.marketData!.stocks.length) {
-      this.selectedIndex = Math.max(0, this.marketData!.stocks.length - 1);
-    }
-
-    if (this.marketData!.stocks.length > 0 && this.selectedIndex >= 0) {
-      this.selectedSymbol = this.marketData!.stocks[this.selectedIndex].symbol;
-    } else {
-      this.selectedSymbol = null;
-      this.selectedIndex = -1;
-    }
-    
-    this.savePortfolio();
-    
-    // Re-render
-    this.renderWithCurrentStatus();
-  }
-
-  public getSelectedIndex(): number {
-    return this.selectedIndex;
-  }
-
-  public getSelectedSymbol(): string | null {
-    return this.selectedSymbol;
-  }
-
-  public setupSearchService(searchService: SearchService, onAddStock: (symbol: string, name: string) => void) {
-    this.searchPanel = new SearchPanel(
-      searchService,
-      onAddStock,
-      () => {}, // Close callback
-      () => this.renderWithCurrentStatus(),
-      () => {},
-    );
-  }
-
-  private createPortfolioTotalBox() {
-    const total = this.getPortfolioTotal();
-    const currencySymbol = this.displayCurrency === 'EUR' ? '€' : '$';
-    const valueStr = `${currencySymbol}${total.value.toFixed(0)}`;
-    const plSign = total.pl >= 0 ? '+' : '';
-    const plColor = total.pl >= 0 ? '#00FF00' : '#FF0000';
-    const plStr = `${plSign}${currencySymbol}${total.pl.toFixed(0)} (${plSign}${total.plPercent.toFixed(1)}%)`;
-
-    const hasTransactions = this.positions.some(p => p.transactions.length > 0);
-
-    return Box(
-      {
-        id: 'portfolio-total',
-        flexDirection: 'row',
-        gap: 2,
-        paddingLeft: 1,
-        paddingRight: 1
-      },
-      Text({
-          content: valueStr,
-          fg: '#FFFFFF'
-        }),
-        Text({
-          content: plStr,
-          fg: plColor
-        }),
-        hasTransactions ? Box(
-          {
-            width: 3,
-            height: 1,
-            backgroundColor: '#222244',
-            onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.openPortfolioGraphDialog(); }
-          },
-          Text({ content: '📊', width: 2, fg: '#00BFFF' })
-        ) : Box({ width: 3 }),
-    );
-  }
-
-  renderStockTable(marketData: MarketData, status: AppStatus) {
-    if (!this.isInitialized) {
-      throw new Error('Renderer not initialized. Call initialize() first.');
-    }
-
-    // Cache data for re-rendering when selection changes
-    this.marketData = marketData;
-    this.currentStatus = status; // Cache status to prevent timestamp updates on selection
-
-    // Clear previous content first
-    this.clearScreen();
-
-    // Normal content column
-    const content = Box(
-      {
-        width: '100%',
-        flexDirection: 'column',
-        flexGrow: 1
-      },
-      this.createHeader(status),
-      this.createMarketSummary(marketData),
-      this.createStockTable(marketData.stocks),
-      this.createFooter(status)
-    );
-
-    this.renderer.root.add(
-      Box(
-        { width: '100%', height: '100%', flexDirection: 'column', padding: 1 },
-        content
-      )
-    );
-
-    if (this.dialogMode !== 'none') {
-      this.renderer.root.add(
-        Box(
-          {
-            id: 'dialog-overlay',
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-            flexDirection: 'row',
-            justifyContent: 'center',
-            alignItems: 'center',
-            zIndex: 100
-          },
-          this.dialogMode === 'delete' ? this.createDeleteConfirmDialog() : 
-          this.dialogMode === 'deleteTransaction' ? this.createDeleteTransactionDialog() :
-          this.dialogMode === 'help' ? this.createHelpDialog() :
-          this.dialogMode === 'search' ? this.createSearchDialog() :
-          this.dialogMode === 'portfolioGraph' ? this.createPortfolioGraphDialog() : this.createTransactionDialog()
-        )
-      );
-    }
-
-    if (this.selectedIndex > 0 && this.dialogMode === 'none') {
-      setTimeout(() => {
-        this.scrollableContent.scrollBy(this.scrollPosition, "absolute");
-      }, 0);
-    }
-  }
-
-  renderLoading(progress?: LoadingProgress) {
-    if (!this.isInitialized) return;
-    
-    // Clear previous content first
-    this.clearScreen();
-    
-    const elements = [];
-    
-    // Main loading message
-    elements.push(
-      Text({
-        content: '🔄 Loading data...',
-        fg: '#00FF00'
-      })
-    );
-    
-    // Add progress details if available
-    if (progress) {
-      elements.push(
-        Box(
-          {
-            width: '80%',
-            flexDirection: 'column',
-            alignItems: 'center',
-            marginTop: 2,
-            borderStyle: 'single',
-            borderColor: '#333333',
-            padding: 1
-          },
-          Text({
-            content: `Batch ${progress.currentBatch}/${progress.totalBatches}`,
-            fg: '#FFFFFF'
-          }),
-          Text({
-            content: `Stocks: ${progress.completedStocks}/${progress.totalStocks}`,
-            fg: '#00BFFF'
-          }),
-          Text({
-            content: progress.currentBatchStocks.length > 0 ? 
-              `Processing: ${progress.currentBatchStocks.join(', ')}` : 
-              'Waiting for next batch...',
-            fg: '#CCCCCC'
-          }),
-          Box(
-            {
-              flexDirection: 'row',
-              gap: 3,
-              marginTop: 1
-            },
-            Text({
-              content: `✅ Success: ${progress.successCount}`,
-              fg: '#00FF00'
-            }),
-            Text({
-              content: `❌ Errors: ${progress.errorCount}`,
-              fg: '#FF0000'
-            })
-          ),
-          Text({
-            content: `Elapsed: ${progress.elapsedTime}s`,
-            fg: '#AAAAAA'
-          })
-        )
-      );
-      
-      // Show recent errors if any
-      if (progress.recentErrors.length > 0) {
-        elements.push(
-          Box(
-            {
-              width: '80%',
-              flexDirection: 'column',
-              marginTop: 1,
-              borderStyle: 'single',
-              borderColor: '#FF0000',
-              padding: 1
-            },
-            Text({
-              content: 'Recent Errors:',
-              fg: '#FF0000'
-            }),
-            ...progress.recentErrors.slice(0, 3).map((error: string) => 
-              Text({
-                content: error.length > 60 ? error.substring(0, 57) + '...' : error,
-                fg: '#FF6B6B'
-              })
-            )
-          )
-        );
-      }
-    }
-    
-    // Instructions
-    elements.push(
-      Box(
-        {
-          marginTop: 2,
-          flexDirection: 'column',
-          alignItems: 'center'
-        },
-        Text({
-          content: 'Please wait while we fetch live market data...',
-          fg: '#CCCCCC'
-        }),
-        Text({
-          content: 'Press Ctrl+C to cancel',
-          fg: '#AAAAAA'
-        })
-      )
-    );
-    
-    this.renderer.root.add(
-      Box(
-        {
-          width: '100%',
-          height: '100%',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: 2
-        },
-        ...elements
-      )
-    );
-  }
-
-  renderError(error: string) {
-    if (!this.isInitialized) return;
-    
-    // Clear previous content first
-    this.clearScreen();
-    
-    this.renderer.root.add(
-      Box(
-        {
-          width: '100%',
-          height: '100%',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: 2
-        },
-        Text({
-          content: '❌ API Connection Failed',
-          fg: '#FF0000'
-        }),
-        Text({
-          content: error,
-          fg: '#FF6B6B'
-        }),
-        Text({
-          content: 'Press Ctrl+C to exit',
-          fg: '#CCCCCC'
-        })
-      )
-    );
-  }
-
-  renderEmptyState(message: string = 'Press Ctrl+F to search and add stocks'): void {
-    if (!this.isInitialized) return;
-    
-    this.clearScreen();
-    
-    this.renderer.root.add(
-      Box(
-        {
-          width: '100%',
-          height: '100%',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: 2
-        },
-        Text({
-          content: '📊 No stocks in portfolio',
-          fg: '#00FFFF',
-          width: 30
-        }),
-        Box({ width: '100%', height: 1 }),
-        Text({
-          content: message,
-          fg: '#888888'
-        })
-      )
-    );
-  }
-
-  private createHeader(status: AppStatus) {
-
-    const portfolioTotal = this.createPortfolioTotalBox();
-
-    return Box(
-      {
-        width: '100%',
-        height: 3,
-        borderStyle: 'single',
-        borderColor: '#00FF00',
-        paddingLeft: 1,
-        paddingRight: 1,
-        flexDirection: 'column'
-      },
-        Box(
-          {
-            width: '100%',
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'center'
-          },
-          // Left side: Title + Search button (small gap)
-          Box(
-            {
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 2,
-              height:1
-            },
-            Text({
-              content: '📈 Stock Live Monitor',
-              fg: '#00FF00'
-            }),
-          ),
-          Box(
-            {
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 2,
-              height:1
-            },
-            portfolioTotal,
-          ),
-          // Right side: Currency toggle + Status indicator
-          Box(
-            {
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 2
-            },
-            Text({
-              content: `🔍 Search Stocks`,
-              fg: '#FFFF00',
-              onMouseDown: () => this.openSearchDialog()
-            }),
-            Text({
-              content: `💰 ${this.displayCurrency}`,
-              fg: '#FFFF00',
-              onMouseDown: () => this.toggleCurrency()
-            }),
-            Text({
-              content: this.getStatusIndicator(status),
-              fg: status.isConnected ? '#00FF00' : '#FF0000'
-            })
-          )
-        )
-    );
-  }
-
-  private createMarketSummary(marketData: MarketData) {
-    const summary = marketData.getSummary();
-    
-    return Box(
-      {
-        width: '100%',
-        height: 1,
-        paddingLeft: 1,
-        paddingRight: 1,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      },
-      Box(
-        {
-          flexDirection: 'row',
-          gap: 4
-        },
-        Text({
-          content: `Stocks: ${summary.totalStocks}`,
-          fg: '#FFFFFF'
-        }),
-        Text({
-          content: `↑ ${summary.gainers}`,
-          fg: '#00FF00'
-        }),
-        Text({
-          content: `↓ ${summary.losers}`,
-          fg: '#FF0000'
-        })
-      ),
-      Text({
-        content: `Sentiment: ${summary.sentiment}`,
-        fg: this.getSentimentColor(summary.sentiment)
-      })
-    );
-  }
-
-  private createStockTable(stocks: Stock[]) {
-    // Table header (fixed, outside scroll area)
-    const headerRow = this.createTableHeader();
-    
-    // Create scrollable stock rows with zebra striping and purchase panels
-    const rows = [];
-    
-    // Show empty state message inside the table
-    if (stocks.length === 0) {
-      const box = new BoxRenderable(this.renderer,
-          {
-            width: '100%',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: 1,
-            paddingTop: 2,
-            paddingBottom: 2,
-          });
-
-      box.add(Text({
-            content: '📊 No stocks in portfolio',
-            fg: '#00FFFF',
-            width: 30
-          }))
-      rows.push(
-        box
-      );
-    } else {
-      stocks.forEach((stock, index) => {
-        rows.push(this.createStockRow(stock, index + 1, index % 2 === 0, index === this.selectedIndex));
-        
-        if (this.expandedSymbols.has(stock.symbol)) {
-          const position = this.getPosition(stock.symbol);
-          if (position && position.transactions.length > 0) {
-            rows.push(this.createPurchaseHistoryPanel(stock.symbol));
-          }
-        }
-      });
-    }
-
-    this.scrollableContent = new ScrollBoxRenderable(this.renderer,
-      {
-        width: '100%',
-        flexGrow: 1,
-        minHeight: 3,
-        scrollY: true,
-        scrollX: false,
-        viewportCulling: true
-      },
-    );
-
-    rows.forEach((row) => {
-      this.scrollableContent.add(row);
-    });
-
-    return Box(
-      {
-        width: '100%',
-        flexDirection: 'column',
-        borderStyle: 'single',
-        borderColor: '#666666',
-        flexGrow: 1
-      },
-      headerRow,
-      this.scrollableContent
-    );
-  }
-
-  private createTableHeader() {
-    return Box(
-      {
-        width: '100%',
-        height: 1,
-        backgroundColor: '#333333',
-        flexDirection: 'row',
-        paddingLeft: 1,
-        paddingRight: 1,
-      },
-      Text({ content: '#', width: 5, fg: '#FFFFFF' }),
-      Text({ content: 'Symbol', width: HEADER_WIDTH_SYMBOL, fg: '#FFFFFF' }),
-      Text({ content: 'Name', width: 20, fg: '#FFFFFF' }),
-      Text({ content: 'Price', width: HEADER_WIDTH_PRICE, fg: '#FFFFFF' }),
-      Text({ content: 'Change', width: HEADER_WIDTH_CHANGE, fg: '#FFFFFF' }),
-      Text({ content: 'Qty', width: HEADER_WIDTH_QUANTITY, fg: '#FFFFFF' }),
-      Text({ content: 'Invested', width: HEADER_WIDTH_INVESTED, fg: '#FFFFFF' }),
-      Text({ content: 'Value', width: HEADER_WIDTH_VALUE, fg: '#FFFFFF' }),
-      Text({ content: 'Unreal.', width: HEADER_WIDTH_VALUE, fg: '#FFFFFF' }),
-      Text({ content: 'Real.', width: 10, fg: '#FFFFFF' }),
-      Text({ content: 'Actions', width: 15, fg: '#FFFFFF' })
-    );
-  }
-
-  private createStockRow(stock: Stock, index: number, isEvenRow: boolean = false, isSelected: boolean = false) {
-    const changeColor = stock.isPositive ? '#00FF00' : '#FF0000';
-    
-    let backgroundColor: string;
-    if (isSelected) {
-      backgroundColor = '#0055AA';
-    } else {
-      backgroundColor = isEvenRow ? '#2a2a2a' : '#1a1a1a';
-    }
-    
-    const symbolColor = isSelected ? '#00FFFF' : '#00BFFF';
-    const position = this.getPosition(stock.symbol);
-    const stockCurrency = stock.price.currency;
-    const nativeSymbol = getNativeCurrencySymbol(stockCurrency);
-    const displaySymbol = this.getDisplayCurrencySymbol();
-    
-    // Price column: show native price with native symbol (NOT converted)
-    const nativePrice = stock.price.amount;
-    
-    // Invested: calculate from transaction in native currency (NOT converted)
-    const investedInNative = this.calculateInvestedInNativeCurrency(stock.symbol);
-    
-    // Other values: convert to display currency
-    const convertedPrice = this.convertPrice(stock.price.amount, stockCurrency);
-    
-    // Calculate position with converted price - this handles Value/Unreal/Real
-    const pos = this.calculatePositionSummary(stock.symbol, nativePrice);
-    
-    const hasPosition = pos.qty > 0;
-    const hasTransactions = position && position.transactions.length > 0;
-
-    const moveUpButton = this.createActionButton('🔼', '#00FF00', () => this.handleMoveUp(index - 1), isSelected, !pos.qty || pos.qty === 0 ? 4: 2);
-    const moveDownButton = this.createActionButton('🔽', '#FFFF00', () => this.handleMoveDown(index - 1), isSelected);    
-
-    const qtyText = hasPosition ? pos.qty.toString() : '-';
-    // Invested: show native currency value (NOT converted)
-    const investedText = hasTransactions ? `${nativeSymbol}${investedInNative.toFixed(0)}` : '-';
-    // Value/Unreal/Real: show converted to display currency
-    const valueText = hasPosition ? `${displaySymbol}${(convertedPrice*pos.qty).toFixed(0)}` : '-';
-    
-    const unrealColor = pos.unrealizedPL >= 0 ? '#00FF00' : '#FF0000';
-    const unrealSign = pos.unrealizedPL >= 0 ? '+' : '';
-    const unrealText = hasTransactions ? `${unrealSign}${displaySymbol}${this.convertPrice(pos.unrealizedPL, stockCurrency).toFixed(0)}` : '-';
-    
-    const realColor = pos.realizedPL >= 0 ? '#00FF00' : '#FF0000';
-    const realSign = pos.realizedPL >= 0 ? '+' : '';
-    const realText = hasTransactions ? `${realSign}${displaySymbol}${this.convertPrice(pos.realizedPL, stockCurrency).toFixed(0)}` : '-';
-
-    const buyBtn = this.createActionButton('📈', '#00FF88', () => this.openBuyDialog(stock.symbol), isSelected, 0);
-    const sellBtn = this.createActionButton('📉', '#FF8888', () => this.openSellDialog(stock.symbol), !hasPosition || !isSelected ? false : true, 1);
-    const deleteBtn = this.createActionButton('❌', '#FF0000', () => this.openDeleteConfirmDialog(stock.symbol), isSelected, 1);
-    
-    const isExpanded = this.expandedSymbols.has(stock.symbol);
-    const detailsBtn = this.createActionButton('📋', isExpanded ? '#00FFFF' : '#888888', () => {
-      if (isExpanded) {
-        this.expandedSymbols.delete(stock.symbol);
-      } else {
-        this.expandedSymbols.add(stock.symbol);
-      }
-      this.renderWithCurrentStatus();
-    }, isSelected && hasTransactions, 1);
-    
-    const buttonSpacer = Box({ width: 1, height: 1, backgroundColor: 'transparent' }, Text({ content: '', width: 1 }));
-
-    return Box(
-      {
-        id: `stock-row-${stock.symbol}-${index}`,
-        width: '100%',
-        height: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor,
-        focusable: true,
-        paddingLeft: 1,
-        paddingRight:1,
-        onMouseDown: (event) => {
-          if (this.dialogMode !== 'none') return;
-          if (event.button === 0) {
-            this.handleRowClick(stock, index - 1);
-          }
-        }
-      },
-      Text({ content: index.toString(), width: 5, fg: '#CCCCCC' }),
-      Text({ content: stock.symbol, width: HEADER_WIDTH_SYMBOL, fg: symbolColor }),
-      Text({ content: this.truncateName(stock.name, 19), width: 20, fg: '#888888' }),
-      Text({ content: `${nativeSymbol}${nativePrice.toFixed(2)}`, width: HEADER_WIDTH_PRICE, fg: '#FFFFFF' }),
-      Text({ content: stock.formattedPriceChange, width: HEADER_WIDTH_CHANGE, fg: changeColor }),
-      Text({ content: qtyText, width: HEADER_WIDTH_QUANTITY, fg: hasPosition ? '#FFFFFF' : '#666666' }),
-      Text({ content: investedText, width: HEADER_WIDTH_INVESTED, fg: hasTransactions ? '#888888' : '#666666' }),
-      Text({ content: valueText, width: HEADER_WIDTH_VALUE, fg: hasPosition ? '#FFFFFF' : '#666666' }),
-      Text({ content: unrealText, width: HEADER_WIDTH_VALUE, fg: hasPosition ? unrealColor : '#666666' }),
-      Text({ content: realText, width: 10, fg: hasTransactions && pos.realizedPL !== 0 ? realColor : '#666666' }),      
-      buyBtn,
-      sellBtn,
-      detailsBtn,
-      buttonSpacer,
-      moveUpButton,
-      buttonSpacer,
-      moveDownButton,
-      deleteBtn
-    );
-  }
-
-  private createPurchaseHistoryPanel(symbol: string) {
-    const position = this.getPosition(symbol);
-    if (!position || !this.expandedSymbols.has(symbol)) {
-      return null;
-    }
-
-    const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
-    const convertedPrice = stock ? stock.price.amount : 0;
-    const displaySymbol = this.getDisplayCurrencySymbol();
-        
-    const transactionsWithPL = calculateTransactionsWithPL(position.transactions, convertedPrice);
-
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-    const formatDate = (dateStr: string) => {
-      const parts = dateStr.split('-');
-      if (parts.length === 3) {
-        const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-        return `${monthNames[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
-      }
-      return dateStr;
-    };
-
-    const transactionRows = transactionsWithPL.map((t) => {
-      const isSelected = t.id === this.selectedTransactionId;
-      const plColor = t.pl >= 0 ? '#00FF00' : '#FF0000';
-      const plSign = t.pl >= 0 ? '+' : '';
-      const typeColor = t.type === 'BUY' ? '#00FF00' : '#FF8888';
-      const typeLabel = t.type === 'BUY' ? 'BUY' : 'SELL';
-      
-      // Get original transaction currency and symbol
-      const originalTransaction = position.transactions.find(orig => orig.id === t.id);
-      const origCurrency = originalTransaction?.currency || 'USD';
-      const origSymbol = getNativeCurrencySymbol(origCurrency);
-      
-      // Price: show original price in original currency (NOT converted)
-      const originalPrice = originalTransaction?.pricePerShare || t.pricePerShare;
-      
-      return Box(
-        {
-          width: '100%',
-          flexDirection: 'row',
-          paddingLeft: 2,
-          backgroundColor: isSelected ? '#553300' : 'transparent',
-          onMouseDown: (e: MouseEvent) => {
-            e.stopPropagation();
-            this.selectedTransactionId = isSelected ? null : t.id;
-            this.expandedTransactionSymbol = symbol;
-            this.renderWithCurrentStatus();
-          }
-        },
-        Text({ content: formatDate(t.date), width: 14, fg: '#AAAAAA' }),
-        Text({ content: typeLabel, width: 7, fg: typeColor }),
-        Text({ content: `${origSymbol}${originalPrice.toFixed(2)}`, width: 12, fg: '#888888' }),
-        Text({ content: String(t.qty), width: 10, fg: '#FFFFFF' }),
-        Text({ content: `${plSign}${displaySymbol}${this.convertPrice(t.pl, t.currency).toFixed(0)}`, width: 12, fg: plColor }),
-        Text({ content: `${plSign}${t.plPercent.toFixed(0)}%`, width: 8, fg: plColor }),
-        Text({ content: `${displaySymbol}${this.convertPrice(t.currentValue, t.currency).toFixed(0)}`, width: 12, fg: '#FFFFFF' }),
-        Box(
-          { 
-            width: 3,
-            onMouseDown: (e: MouseEvent) => {
-              e.stopPropagation();
-              this.openDeleteTransactionDialog(symbol, t.id);
-            }
-          },
-          Text({ content: '❌', fg: isSelected ? '#FF4444' : '#444444' })
-        )
-      );
-    });
-
-    const headerRow = Box(
-      {
-        width: '100%',
-        flexDirection: 'row',
-        backgroundColor: '#1a1a1a',
-        paddingLeft: 2
-      },
-      Text({ content: 'Date', width: 14, fg: '#666666' }),
-      Text({ content: 'Type', width: 7, fg: '#666666' }),
-      Text({ content: 'Price', width: 12, fg: '#666666' }),
-      Text({ content: 'Qty', width: 10, fg: '#666666' }),
-      Text({ content: 'Gain', width: 12, fg: '#666666' }),
-      Text({ content: '%', width: 8, fg: '#666666' }),
-      Text({ content: 'Value', width: 12, fg: '#666666' }),
-      Text({ content: '', width: 3, fg: '#666666' })
-    );
-
-    return Box(
-      {
-        width: '100%',
-        flexDirection: 'column',
-        borderStyle: 'single',
-        borderColor: '#444444',
-        backgroundColor: '#0a0a0a',
-        padding: 0
-      },
-      headerRow,
-      ...transactionRows
-    );
-  }
-
-  private createFooter(status: AppStatus) {
-    const lastUpdate = status.lastUpdate ? 
-      `Last: ${status.lastUpdate.toLocaleTimeString()}` : 'Never';
-
-    return Box(
-      {
-        width: '100%',
-        height: 1,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginLeft: 1,
-        paddingRight: 1,
-      },
-      Text({
-        content: lastUpdate,
-        fg: '#CCCCCC'
-      }),
-      Text({
-        content: `v${APP_VERSION} | Press Ctrl+C to exit`,
-        fg: '#CCCCCC'
-      })
-    );
-  }
-
-  private getStatusIndicator(status: AppStatus) {
-    if (status.isLoading) return '🔄 UPDATING';
-    if (status.hasError) return '❌ ERROR';
-    if (status.isConnected) return '🟢 LIVE';
-    return '🔴 OFFLINE';
-  }
-
-  private getSentimentColor(sentiment: string): string {
-    switch (sentiment) {
-      case 'BULLISH': return '#00FF00';
-      case 'BEARISH': return '#FF0000';
-      default: return '#FFA500';
-    }
-  }
-
-  destroy(): void {
-    if (this.isInitialized) {
-      // Clean up resize timeout
-      if (this.resizeTimeout) {
-        clearTimeout(this.resizeTimeout);
-      }
-      
-      // Remove resize event listeners
-      if (process.stdout && process.stdout.removeListener) {
-        process.stdout.removeListener('resize', this.handleResize);
-      }
-      if (process.removeListener) {
-        process.removeListener('SIGWINCH', this.handleResize);
-      }
-      
-      // Cleanup search panel
-      if (this.searchPanel) {
-        this.searchPanel.destroy();
-        this.searchPanel = null;
-      }
-    }
-  }
-
-  // ========== Portfolio Management ==========
-
-  async loadPortfolio(): Promise<Position[]> {
-    this.positions = await this.portfolioStore.load();
-    return this.positions;
-  }
-
-  private savePortfolio(): void {
-    this.portfolioStore.save(this.positions);
-  }
-
-  getPosition(symbol: string): Position | undefined {
-    return this.positions.find(p => p.symbol === symbol);
-  }
-
-  getPositions(): Position[] {
-    return this.positions;
-  }
-
-  getSavedSymbols(): { symbol: string; name: string }[] {
-    return this.positions.map(p => ({ symbol: p.symbol, name: p.name }));
-  }
-
-  addSymbol(symbol: string, name: string): void {
-    const existing = this.positions.find(p => p.symbol === symbol);
-    if (!existing) {
-      this.positions = [...this.positions, { symbol, name, transactions: [] }];
-      this.savePortfolio();
-      console.log(`💾 Added ${symbol} to portfolio`);
-    }
-  }
-
-  // ========== Position Calculations ==========
-
-  private calculatePositionSummary(symbol: string, currentPrice: number) {
-    const position = this.getPosition(symbol);
-    if (!position || position.transactions.length === 0) {
-      return { qty: 0, totalInvested: 0, avgCost: 0, currentValue: 0, unrealizedPL: 0, unrealizedPLPercent: 0, realizedPL: 0 };
-    }
-    
-    const summary = calculatePositionSummary(position.transactions, currentPrice);
-    return summary;
-  }
-
-  private calculateInvestedInNativeCurrency(symbol: string): number {
-    const position = this.getPosition(symbol);
-    if (!position || position.transactions.length === 0) return 0;
-    
-    let invested = 0;
-    for (const t of position.transactions) {
-      if (t.type === 'BUY') {
-        invested += t.qty * t.pricePerShare;
-      } else if (t.type === 'SELL') {
-        invested -= t.qty * t.pricePerShare;
-      }
-    }
-    return invested;
-  }
-
-  getPortfolioTotal(): { value: number; invested: number; pl: number; plPercent: number } {
-    let totalValue = 0;
-    let totalInvested = 0;
-    
-    for (const position of this.positions) {
-      const stock = this.marketData?.getStock(position.symbol);
-      const stockPrice = stock?.price.amount || 0;
-      const stockCurrency = stock?.price.currency || 'USD';
-      
-      // Get position summary in native currency
-      const summary = this.calculatePositionSummary(position.symbol, stockPrice);
-      
-      try {
-        // Convert to display currency before summing - this is crucial!
-        // Without conversion, we'd be adding USD + EUR + JPY which is mathematically invalid
-        const convertedValue = this.convertPrice(summary.currentValue, stockCurrency);
-        const convertedInvested = this.convertPrice(summary.totalInvested, stockCurrency);
-        
-        totalValue += convertedValue;
-        totalInvested += convertedInvested;
-                
-      } catch (error) {
-        debugLog(`⚠️ Skipping ${position.symbol} in portfolio total due to currency conversion error: ${error}`);
-        // Skip this position rather than crash the entire portfolio calculation
-        // This could happen if exchange rates are missing or stale
-      }
-    }
-    
-    const pl = totalValue - totalInvested;
-    const plPercent = totalInvested > 0 ? (pl / totalInvested) * 100 : 0;
-    
-    return { value: totalValue, invested: totalInvested, pl, plPercent };
-  }
-
-  // ========== Dialog Methods ==========
-
-  private cycleDialogFocus(direction: 'left' | 'right'): void {
-    const order: typeof this.dialogFocusedField[] = ['monthLt', 'monthGt', 'dayLt', 'dayGt', 'yearLt', 'yearGt', 'qty', 'price', 'cancel', 'ok'];
-    const idx = order.indexOf(this.dialogFocusedField);
-    if (direction === 'left') {
-      this.dialogFocusedField = order[(idx - 1 + order.length) % order.length];
-    } else {
-      this.dialogFocusedField = order[(idx + 1) % order.length];
-    }
-    this.renderWithCurrentStatus();
-  }
-
-  private incrementFocusedField(): void {
-    switch (this.dialogFocusedField) {
-      case 'monthLt': case 'monthGt': this.incrementMonth(); break;
-      case 'dayLt': case 'dayGt': this.incrementDay(); break;
-      case 'yearLt': case 'yearGt': this.incrementYear(); break;
-      case 'qty': case 'price': case 'cancel': case 'ok': break;
-    }
-  }
-
-  private decrementFocusedField(): void {
-    switch (this.dialogFocusedField) {
-      case 'monthLt': case 'monthGt': this.decrementMonth(); break;
-      case 'dayLt': case 'dayGt': this.decrementDay(); break;
-      case 'yearLt': case 'yearGt': this.decrementYear(); break;
-      case 'qty': case 'price': case 'cancel': case 'ok': break;
-    }
-  }
-
-  private actOnFocusedField(): void {
-    switch (this.dialogFocusedField) {
-      case 'cancel': this.closeDialog(); break;
-      case 'ok': this.dialogMode === 'buy' ? this.confirmBuy() : this.confirmSell(); break;
-      case 'qty': case 'price': break;
-      default: break;
-    }
-  }
-
-  private scheduleDateChangeFetch(): void {
-    if (this.dialogFetchTimer) {
-      clearTimeout(this.dialogFetchTimer);
-    }
-    this.dialogFetchTimer = setTimeout(() => {
-      this.fetchHistoricalPrice();
-    }, 1000);
-  }
-
-  private incrementDay(): void {
-    const daysInMonth = new Date(this.dialogYear, this.dialogMonth + 1, 0).getDate();
-    this.dialogDay++;
-    if (this.dialogDay > daysInMonth) {
-      this.dialogDay = 1;
-      this.incrementMonth();
-    }
-
-    this.scheduleDateChangeFetch();
-  }
-
-  private decrementDay(): void {
-    const daysInPrevMonth = new Date(this.dialogYear, this.dialogMonth, 0).getDate();
-    this.dialogDay--;
-    if (this.dialogDay < 1) {
-      this.dialogDay = daysInPrevMonth;
-      this.decrementMonth();
-    }
-
-    this.scheduleDateChangeFetch();
-  }
-
-  private incrementMonth(): void {
-    this.dialogMonth++;
-    if (this.dialogMonth > 11) {
-      this.dialogMonth = 0;
-      this.dialogYear++;
-    }
-    const daysInMonth = new Date(this.dialogYear, this.dialogMonth + 1, 0).getDate();
-    if (this.dialogDay > daysInMonth) {
-      this.dialogDay = daysInMonth;
-    }
-
-    this.scheduleDateChangeFetch();
-  }
-
-  private decrementMonth(): void {
-    this.dialogMonth--;
-    if (this.dialogMonth < 0) {
-      this.dialogMonth = 11;
-      this.dialogYear--;
-    }
-    const daysInMonth = new Date(this.dialogYear, this.dialogMonth + 1, 0).getDate();
-    if (this.dialogDay > daysInMonth) {
-      this.dialogDay = daysInMonth;
-    }
-
-    this.scheduleDateChangeFetch();
-  }
-
-  private incrementYear(): void {
-    this.dialogYear++;
-    const daysInMonth = new Date(this.dialogYear, this.dialogMonth + 1, 0).getDate();
-    if (this.dialogDay > daysInMonth) {
-      this.dialogDay = daysInMonth;
-    }
-
-    this.scheduleDateChangeFetch();
-  }
-
-  private decrementYear(): void {
-    this.dialogYear--;
-    const daysInMonth = new Date(this.dialogYear, this.dialogMonth + 1, 0).getDate();
-    if (this.dialogDay > daysInMonth) {
-      this.dialogDay = daysInMonth;
-    }
-
-    this.scheduleDateChangeFetch();
-  }
-
-  openBuyDialog(symbol: string): void {
-    this.dialogMode = 'buy';
-    this.dialogSymbol = symbol;
-    this.dialogQty = '';
-    
-    const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
-    const convertedPrice = stock ? stock.price.amount : 0;
-    this.dialogPrice = convertedPrice > 0 ? convertedPrice.toFixed(2) : '';
-    this.dialogFetchingPrice = false;
-    
-
-    this.renderWithCurrentStatus();
-  }
-
-  openSellDialog(symbol: string): void {
-    this.dialogMode = 'sell';
-    this.dialogSymbol = symbol;
-    this.dialogQty = '';
-    this.dialogMessage = '';
-    
-    const stock = this.marketData?.stocks.find(s => s.symbol === symbol);
-    const convertedPrice = stock ? stock.price.amount : 0;
-    this.dialogPrice = convertedPrice > 0 ? convertedPrice.toFixed(2) : '';
-    this.dialogFetchingPrice = false;
-    
-
-    this.renderWithCurrentStatus();
-  }
-
-  closeDialog(): void {
-
-    this.dialogMode = 'none';
-    this.dialogSymbol = '';
-    this.dialogMessage = '';
-    this.selectedTransactionId = null;
-    this.expandedTransactionSymbol = null;
-    
-    // Note: Search dialog state is preserved (query, results) per requirements
-    
-    this.renderWithCurrentStatus();
-  }
-
-  openSearchDialog(): void {
-    this.dialogMode = 'search';
-    this.renderWithCurrentStatus();
-  }
-
-  closeSearchDialog(): void {
-    this.dialogMode = 'none';
-    this.renderWithCurrentStatus();
-  }
-
-  openDeleteConfirmDialog(symbol: string): void {
-    this.dialogMode = 'delete';
-    this.dialogSymbol = symbol;
-    this.renderWithCurrentStatus();
-  }
-
-  createDeleteConfirmDialog() {
-    const symbol = this.dialogSymbol;
-
-    return Box(
-      {
-        id: 'delete-dialog',
-        width: 45,
-        flexDirection: 'column',
-        borderStyle: 'double',
-        borderColor: '#FF4444',
-        backgroundColor: '#08081a',
-        padding: 1,
-        zIndex: 100
-      },
-      Text({ content: '⚠️  DELETE STOCK', fg: '#FF4444', width: 45 }),
-      Box({ width: '100%', height: 1 }),
-      Text({ content: `Remove ${symbol} from watchlist?`, fg: '#FFFFFF', width: 45 }),
-      Box({ width: '100%', height: 1 }),
-      Box(
-        { width: 45, flexDirection: 'row', justifyContent: 'center', gap: 3 },
-        Box(
-          {
-            width: 10,
-            height: 1,
-            onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.handleDeleteBySymbol(symbol); this.closeDialog(); }
-          },
-          Text({ content: ' [Enter] ', fg: '#FF4444', width: 10 })
-        ),
-        Box(
-          {
-            width: 10,
-            height: 1,
-            onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.closeDialog(); }
-          },
-          Text({ content: ' [Esc]  ', fg: '#44FF44', width: 10 })
-        )
-      )
-    );
-  }
-
-  confirmDelete(): void {
-    this.handleDeleteBySymbol(this.dialogSymbol);
-    this.closeDialog();
-  }
-
-  private handleDeleteBySymbol(symbol: string): void {
-    const index = this.marketData!.stocks.findIndex(s => s.symbol === symbol);
-    if (index !== -1) {
-      this.handleDelete(index);
-    }
-  }
-
-  openDeleteTransactionDialog(symbol: string, transactionId: string): void {
-    this.dialogMode = 'deleteTransaction';
-    this.dialogTransactionSymbol = symbol;
-    this.dialogTransactionId = transactionId;
-    this.renderWithCurrentStatus();
-  }
-
-  createDeleteTransactionDialog() {
-    const symbol = this.dialogTransactionSymbol;
-
-    return Box(
-      {
-        id: 'delete-transaction-dialog',
-        width: 50,
-        flexDirection: 'column',
-        borderStyle: 'double',
-        borderColor: '#FF4444',
-        backgroundColor: '#08081a',
-        padding: 1,
-        zIndex: 100
-      },
-      Text({ content: '⚠️  DELETE TRANSACTION', fg: '#FF4444', width: 50 }),
-      Box({ width: '100%', height: 1 }),
-      Text({ content: `Remove this transaction from ${symbol}?`, fg: '#FFFFFF', width: 50 }),
-      Box({ width: '100%', height: 1 }),
-      Box(
-        { width: 50, flexDirection: 'row', justifyContent: 'center', gap: 3 },
-        Box(
-          {
-            width: 10,
-            height: 1,
-            onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.confirmDeleteTransaction(); }
-          },
-          Text({ content: ' [Enter] ', fg: '#FF4444', width: 10 })
-        ),
-        Box(
-          {
-            width: 10,
-            height: 1,
-            onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.closeDialog(); }
-          },
-          Text({ content: ' [Esc]  ', fg: '#44FF44', width: 10 })
-        )
-      )
-    );
-  }
-
-  confirmDeleteTransaction(): void {
-    if (this.dialogTransactionSymbol && this.dialogTransactionId) {
-      this.positions = this.portfolioStore.removeTransaction(
-        this.dialogTransactionSymbol, 
-        this.dialogTransactionId, 
-        this.positions
-      );
-      this.savePortfolio();
-      this.selectedTransactionId = null;
-      this.expandedTransactionSymbol = null;
-    }
-    this.closeDialog();
-  }
-
-  openHelpDialog(): void {
-    this.dialogMode = 'help';
-    this.renderWithCurrentStatus();
-  }
-
-  createHelpDialog() {
-    const shortcuts = [
-      { key: '↑ / ↓', action: 'Navigate stocks' },
-      { key: 'f', action: 'Search stocks' },
-      { key: 'b', action: 'Buy dialog (stock selected)' },
-      { key: 's', action: 'Sell dialog (stock selected)' },
-      { key: 'd', action: 'Delete confirmation (stock selected)' },
-      { key: 'o', action: 'Toggle transaction history (stock selected)' },
-      { key: 'x', action: 'Delete selected transaction' },
-      { key: 'c', action: 'Toggle USD/EUR currency' },
-      { key: '← / →', action: 'Cycle date/input focus' },
-      { key: '↑ / ↓', action: 'Change focused date' },
-      { key: 'Enter', action: 'Confirm dialog' },
-      { key: 'Esc', action: 'Close dialog / Cancel' },
-      { key: 'h', action: 'Show this help' },
-    ];
-
-    const maxKeyWidth = Math.max(...shortcuts.map(s => s.key.length));
-    const maxActionWidth = Math.max(...shortcuts.map(s => s.action.length));
-    const dialogWidth = Math.max(50, maxKeyWidth + maxActionWidth + 8);
-
-    return Box(
-      {
-        id: 'help-dialog',
-        width: dialogWidth,
-        flexDirection: 'column',
-        borderStyle: 'double',
-        borderColor: '#4488FF',
-        backgroundColor: '#08081a',
-        padding: 1,
-        zIndex: 100
-      },
-      Text({ content: '⌨️  KEYBOARD SHORTCUTS', fg: '#4488FF', width: dialogWidth }),
-      Box({ width: '100%', height: 1 }),
-      ...shortcuts.flatMap(s => [
-        Box(
-          { width: dialogWidth, flexDirection: 'row' },
-          Text({ content: `  ${s.key.padEnd(maxKeyWidth)}  `, fg: '#FFFF00', width: maxKeyWidth + 4 }),
-          Text({ content: s.action, fg: '#FFFFFF', width: maxActionWidth })
-        ),
-        Box({ width: '100%', height: 0 })
-      ]),
-      Box({ width: '100%', height: 1 }),
-      Box(
-        { width: dialogWidth, flexDirection: 'row', justifyContent: 'center'},
-        Box(
-          {
-            width: 16,
-            height: 1,
-            onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.closeDialog(); }
-          },
-          Text({ content: ' [Esc] Close ', fg: '#44FF44', width: 16 })
-        )
-      )
-    );
-  }
-
-  private getMaxSellQty(): number {
-    const position = this.getPosition(this.dialogSymbol);
-    if (!position) return 0;
-    const totalBuys = position.transactions
-      .filter(t => t.type === 'BUY')
-      .reduce((sum, t) => sum + t.qty, 0);
-    const totalSells = position.transactions
-      .filter(t => t.type === 'SELL')
-      .reduce((sum, t) => sum + t.qty, 0);
-    return totalBuys - totalSells;
-  }
-
-  private generateId(): string {
-    return Date.now().toString(36) + Math.random().toString(36).substr(2);
-  }
-
-  async confirmBuy(): Promise<void> {
-    const qty = parseInt(this.dialogQty, 10);
-    const userEnteredPrice = parseFloat(this.dialogPrice);
-
-    if (Number.isNaN(qty) || qty <= 0) {
-      return;
-    }
-    if (Number.isNaN(userEnteredPrice) || userEnteredPrice <= 0) {
-      return;
-    }
-
-    const stock = this.marketData?.stocks.find(s => s.symbol === this.dialogSymbol);
-    const name = stock?.name || this.dialogSymbol;
-    const dateStr = `${this.dialogYear}-${String(this.dialogMonth + 1).padStart(2, '0')}-${String(this.dialogDay).padStart(2, '0')}`;
-
-    // Store the user's entered price as-is (already in display currency from UI)
-    // Currency is the stock's native currency from Yahoo (USD, EUR, JPY, etc.)
-    const priceToStore = userEnteredPrice;
-    const currencyToStore = stock?.price.currency || 'USD';
-
-    const transaction: Transaction = {
-      id: this.generateId(),
-      type: 'BUY',
-      date: dateStr,
-      qty,
-      pricePerShare: priceToStore,
-      currency: currencyToStore
-    };
-
-    this.positions = this.portfolioStore.addTransaction(this.dialogSymbol, name, transaction, this.positions);
-    this.savePortfolio();
-    this.closeDialog();
-  }
-
-  async confirmSell(): Promise<void> {
-    const qty = parseInt(this.dialogQty, 10);
-    const userEnteredPrice = parseFloat(this.dialogPrice);
-
-    if (Number.isNaN(qty) || qty <= 0) {
-      return;
-    }
-    if (Number.isNaN(userEnteredPrice) || userEnteredPrice <= 0) {
-      return;
-    }
-
-    const position = this.getPosition(this.dialogSymbol);
-    if (!position) {
-      return;
-    }
-
-    // Calculate current holdings (BUY - SELL)
-    const totalBuys = position.transactions
-      .filter(t => t.type === 'BUY')
-      .reduce((sum, t) => sum + t.qty, 0);
-    const totalSells = position.transactions
-      .filter(t => t.type === 'SELL')
-      .reduce((sum, t) => sum + t.qty, 0);
-    const currentQty = totalBuys - totalSells;
-
-    if (currentQty < qty) {
-      this.dialogMessage = `Max available: ${currentQty} shares`;
-      this.renderWithCurrentStatus();
-      return;
-    }
-
-    const stock = this.marketData?.stocks.find(s => s.symbol === this.dialogSymbol);
-    const name = stock?.name || this.dialogSymbol;
-    const dateStr = `${this.dialogYear}-${String(this.dialogMonth + 1).padStart(2, '0')}-${String(this.dialogDay).padStart(2, '0')}`;
-
-    // Store the user's entered price as-is (already in display currency from UI)
-    // Currency is the stock's native currency from Yahoo (USD, EUR, JPY, etc.)
-    const sellPriceToStore = userEnteredPrice;
-    const sellCurrencyToStore = stock?.price.currency || 'USD';
-
-    const transaction: Transaction = {
-      id: this.generateId(),
-      type: 'SELL',
-      date: dateStr,
-      qty,
-      pricePerShare: sellPriceToStore,
-      currency: sellCurrencyToStore
-    };
-
-    this.positions = this.portfolioStore.addTransaction(this.dialogSymbol, name, transaction, this.positions);
-    this.savePortfolio();
-    this.closeDialog();
-  }
-
-  async fetchHistoricalPrice(): Promise<void> {
-    if (!this.dialogSymbol || this.dialogFetchingPrice) return;
-
-    const dateStr = `${this.dialogYear}-${String(this.dialogMonth + 1).padStart(2, '0')}-${String(this.dialogDay).padStart(2, '0')}`;
-
-    this.dialogFetchingPrice = true;
-    this.renderWithCurrentStatus();
-
-    const price = await this.historicalPriceService.getPriceOnDate(this.dialogSymbol, dateStr);
-
-    this.dialogFetchingPrice = false;
-    if (price !== null) {
-      this.dialogPrice = price.toFixed(2);
-    }
-    this.renderWithCurrentStatus();
-  }
-
-  private createSearchDialog() {
-    if (this.dialogMode !== 'search') return null;
-
-    const searchPanelContent = this.searchPanel ? this.searchPanel.render(true) : null;
-
-    if (!searchPanelContent) {
-      return Box(
-        {
-          id: 'search-dialog-fallback',
-          width: 76,
-          height: 12,
-          flexDirection: 'column',
-          borderStyle: 'double',
-          borderColor: '#00AAFF',
-          backgroundColor: '#08081a',
-          padding: 1,
-          zIndex: 100
-        },
-        Text({ content: '🔍 Search not available', fg: '#FF6666' })
-      );
-    }
-
-    return searchPanelContent;
-  }
-
-  private createTransactionDialog() {
-    if (this.dialogMode === 'none' || this.dialogMode === 'portfolioGraph') return null;
-
-    const FOCUS_FG = '#00FFFF';
-
-    const isBuy = this.dialogMode === 'buy';
-    const symbol = this.dialogSymbol;
-    const title = isBuy ? `BUY: ${symbol}` : `SELL: ${symbol}`;
-    const titleColor = isBuy ? '#00FF88' : '#FF6666';
-    const loading = this.dialogFetchingPrice;
-
-    const qtyInput = Input({ width: 10, maxLength: 8, placeholder: '0', value: this.dialogQty, id: 'transaction-quantity-input' });
-    qtyInput.focus();
-    qtyInput.on(InputRenderableEvents.INPUT, (value: string) => { this.dialogQty = value; });
-
-    const priceInput = Input({ width: 12, maxLength: 10, placeholder: '0.00', value: this.dialogPrice });
-    priceInput.on(InputRenderableEvents.INPUT, (value: string) => { this.dialogPrice = value; });
-    
-    const okBtnFg = loading ? '#666666' : '#00FF00';
-    const okBtnText = loading ? ' Loading... ' : '  [OK]  ';
-
-    const arrowBtn = (label: string, onClick: () => void, disabled: boolean, focusKey: typeof this.dialogFocusedField) => {
-      const isFocused = this.dialogFocusedField === focusKey && !disabled;      
-      const fg = isFocused ? FOCUS_FG : (disabled ? '#444444' : '#00AAFF');
-      return Box(
-        {
-          width: 2,
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: 1,
-          onMouseDown: disabled ? undefined : ((e: any) => { e.stopPropagation(); onClick(); this.renderWithCurrentStatus(); })
-        },
-        Text({ content: label, width: 2, fg })
-      );
-    };
-
-    const shortMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-    return Box(
-      {
-        id: 'transaction-dialog',
-        width: 55,
-        flexDirection: 'column',
-        borderStyle: 'double',
-        borderColor: titleColor,
-        backgroundColor: '#08081a',
-        padding: 1,
-        zIndex: 100
-      },
-      Text({ content: title, fg: titleColor }),
-      Box({ width: '100%', height: 1 }),
-
-      Box(
-        { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 0 },
-        Text({ content: 'Date: ', width: 9, fg: '#888888' }),
-        arrowBtn('<', () => this.decrementMonth(), loading, 'monthLt'),
-        Text({ content: shortMonths[this.dialogMonth], width: 4, fg: '#FFFFFF' }),
-        arrowBtn('>', () => this.incrementMonth(), loading, 'monthGt'),
-        Box({ width: 2 }),
-        arrowBtn('<', () => this.decrementDay(), loading, 'dayLt'),
-        Text({ content: String(this.dialogDay).padStart(2, '0'), width: 3, fg: '#FFFFFF' }),
-        arrowBtn('>', () => this.incrementDay(), loading, 'dayGt'),
-        Box({ width: 2 }),
-        arrowBtn('<', () => this.decrementYear(), loading, 'yearLt'),
-        Text({ content: String(this.dialogYear), width: 5, fg: '#FFFFFF' }),
-        arrowBtn('>', () => this.incrementYear(), loading, 'yearGt')
-      ),
-      Box({ width: '100%', height: 2 }),
-
-      Box(
-        { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 1, height: 1 },
-        Text({ content: 'Qty: ', width: 7, fg: '#888888' }),
-        Box(
-          {borderStyle: 'rounded', paddingLeft: 1, borderColor: '#666666'},
-          qtyInput
-        ),
-        !isBuy ? Box(
-          { flexDirection: 'row' },
-          Text({ content: ' (max: ' + this.getMaxSellQty() + ')', fg: '#666666' })
-        ) : Box({})
-      ),
-
-      Box({ width: '100%', height: 2 }),
-
-      Box(
-        { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 1, height: 1 },
-        Text({ content: 'Price: ', width: 7, fg: '#888888' }),
-        Box(
-          {borderStyle: 'rounded', paddingLeft: 1, borderColor: '#666666'},
-          priceInput
-        ),
-        !isBuy ? Box(
-          { flexDirection: 'row' },
-          Text({ content: ' (max: ' + this.getMaxSellQty() + ')', fg: '#666666' })
-        ) : Box({})
-      ),
-
-
-      Box({ width: '100%', height: 1 }),
-
-      this.dialogMessage ? Box(
-        { width: '100%', flexDirection: 'row', justifyContent: 'center' },
-        Text({ content: this.dialogMessage, fg: '#FF4444' })
-      ) : Box({ width: '100%', height: 1 }),
-
-      Box({ width: '100%', height: 1 }),
-
-      Box(
-        { width: '100%', flexDirection: 'row', justifyContent: 'center', gap: 10 },
-        Box(
-          {
-            width: 9,
-            height: 1,
-            onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.closeDialog(); }
-          },
-          Text({ content: ' [Cancel] ', width: 9, fg: '#FF4444' })
-        ),
-        Box(
-          {
-            width: 9,
-            height: 1,
-            onMouseDown: loading ? undefined : ((e: MouseEvent) => { e.stopPropagation(); isBuy ? this.confirmBuy() : this.confirmSell(); })
-          },
-          Text({ content: okBtnText, width: 9, fg: okBtnFg })
-        )
-      )
-    );
-  }
-
-  async openPortfolioGraphDialog(): Promise<void> {
-    this.dialogMode = 'portfolioGraph';
-    this.graphSelectedRange = '1mo';
-    this.graphData = null;
-    this.graphLoading = true;
-    this.renderWithCurrentStatus();
-
-    const positionsWithTransactions = this.positions.filter(p => p.transactions.length > 0);
-    this.graphData = await this.portfolioHistoryService.getPortfolioHistory(
-      positionsWithTransactions, 
-      this.graphSelectedRange,
-      this.displayCurrency,
-      this.marketData,
-      (amount, fromCurrency) => this.convertPrice(amount, fromCurrency)
-    );
-    this.graphLoading = false;
-    this.renderWithCurrentStatus();
-  }
-
-  private closePortfolioGraphDialog(): void {
-    this.dialogMode = 'none';
-    this.graphData = null;
-    this.renderWithCurrentStatus();
-  }
-
-  async changeGraphRange(range: '1d' | '5d' | '1mo' | '6mo' | 'ytd' | '1y' | '5y' | 'max'): Promise<void> {
-    this.graphSelectedRange = range;
-    this.graphLoading = true;
-    this.graphData = null;
-    this.renderWithCurrentStatus();
-
-    const positionsWithTransactions = this.positions.filter(p => p.transactions.length > 0);
-    this.graphData = await this.portfolioHistoryService.getPortfolioHistory(
-      positionsWithTransactions, 
-      range,
-      this.displayCurrency,
-      this.marketData,
-      (amount, fromCurrency) => this.convertPrice(amount, fromCurrency)
-    );
-    this.graphLoading = false;
-    this.renderWithCurrentStatus();
-  }
-
-  private createPortfolioGraphDialog() {
-    if (this.dialogMode !== 'portfolioGraph') return null;
-
-    const titleColor = '#00BFFF';
-    const ranges: { key: '1d' | '5d' | '1mo' | '6mo' | 'ytd' | '1y' | '5y' | 'max'; label: string }[] = [
-      { key: '1d', label: '1D' },
-      { key: '5d', label: '5D' },
-      { key: '1mo', label: '1M' },
-      { key: '6mo', label: '6M' },
-      { key: 'ytd', label: 'YTD' },
-      { key: '1y', label: '1Y' },
-      { key: '5y', label: '5Y' },
-      { key: 'max', label: 'MAX' }
-    ];
-
-    const rangeButtons = ranges.map(r => {
-      const isSelected = this.graphSelectedRange === r.key;
-      const bg = isSelected ? '#004466' : '#222244';
-      const fg = isSelected ? '#00BFFF' : '#888888';
-      return Box(
-        {
-          width: 4,
-          height: 1,
-          backgroundColor: bg,
-          onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.changeGraphRange(r.key); }
-        },
-        Text({ content: r.label, width: 4, fg })
-      );
-    });
-
-    const chartContent = [];
-
-    if (this.graphLoading) {
-      chartContent.push(
-        Box(
-          { width: '100%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 10 },
-          Text({ content: 'Loading chart data...', fg: '#888888' })
-        )
-      );
-    } else if (this.graphData && this.graphData.dataPoints.length > 0) {
-      const chartResult = AsciiChart.renderWithGradient(this.graphData.dataPoints, 35, 10);
-      const changeColor = this.graphData.change >= 0 ? '#00FF00' : '#FF0000';
-      const changeSign = this.graphData.change >= 0 ? '+' : '';
-      // Use dynamic currency symbol instead of hard-coded EUR
-      const displaySymbol = this.getDisplayCurrencySymbol();
-
-      chartContent.push(
-        ...chartResult.lines.map((line) =>
-          Box(
-            { width: '100%', flexDirection: 'row', justifyContent: 'center' },
-            Text({ content: line, fg: '#00FF00' })
-          )
-        ),
-        Box({ width: '100%', height: 1 }),
-        Box(
-          { width: '100%', flexDirection: 'row', justifyContent: 'space-between' },
-          Text({ content: `Min: ${displaySymbol}${this.graphData.minValue.toFixed(0)}`, fg: '#FF6666' }),
-          Text({ content: `Max: ${displaySymbol}${this.graphData.maxValue.toFixed(0)}`, fg: '#00FF00' })
-        ),
-        Box({ width: '100%', height: 1 }),
-        Box(
-          { width: '100%', flexDirection: 'row', justifyContent: 'space-between' },
-          Text({ content: `Start: ${displaySymbol}${this.graphData.startValue.toFixed(0)}`, fg: '#888888' }),
-          Text({ content: `Now: ${displaySymbol}${this.graphData.currentValue.toFixed(0)}`, fg: '#FFFFFF' })
-        ),
-        Box({ width: '100%', height: 1 }),
-        Box(
-          { width: '100%', flexDirection: 'row', justifyContent: 'center' },
-          Text({ content: `${changeSign}${displaySymbol}${this.graphData.change.toFixed(0)} (${changeSign}${this.graphData.changePercent.toFixed(2)}%)`, fg: changeColor })
-        )
-      );
-    } else {
-      chartContent.push(
-        Box(
-          { width: '100%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 10 },
-          Text({ content: 'No data available', fg: '#FF6666' }),
-          Text({ content: 'Make some transactions to see the graph', fg: '#888888' })
-        )
-      );
-    }
-
-    return Box(
-      {
-        id: 'portfolio-graph-dialog',
-        width: 55,
-        flexDirection: 'column',
-        borderStyle: 'double',
-        borderColor: titleColor,
-        backgroundColor: '#08081a',
-        padding: 1,
-        zIndex: 100
-      },
-      Text({ content: '📈 Portfolio Evolution', fg: titleColor }),
-      Box({ width: '100%', height: 1 }),
-      Box(
-        { width: '100%', flexDirection: 'row', gap: 1 },
-        ...rangeButtons
-      ),
-      Box({ width: '100%', height: 1 }),
-      Box(
-        { width: '100%', flexDirection: 'column', borderStyle: 'single', borderColor: '#333333', paddingLeft: 1, paddingRight: 1 },
-        ...chartContent
-      ),
-      Box({ width: '100%', height: 1 }),
-      Box(
-        { width: '100%', flexDirection: 'row', justifyContent: 'center' },
-        Box(
-          {
-            width: 10,
-            height: 1,
-            onMouseDown: (e: MouseEvent) => { e.stopPropagation(); this.closePortfolioGraphDialog(); }
-          },
-          Text({ content: '  [Close]  ', width: 10, fg: '#FF4444' })
-        )
-      )
-    );
-  }
+	private renderer!: CliRenderer;
+	private isInitialized = false;
+	private resizeTimeout?: NodeJS.Timeout;
+	private _marketData: MarketData | null = null;
+
+	private headerPanel: HeaderPanel | null = null;
+	private summaryPanel: SummaryPanel | null = null;
+	private stockPanel: StockPanel | null = null;
+	private footerPanel: FooterPanel | null = null;
+	private _searchPanel: SearchPanel | null = null;
+
+	private transactionDialog: TransactionDialog | null = null;
+
+	private expandedSymbols: Set<string> = new Set();
+
+	private _positions: Position[] = [];
+	private portfolioStore: PortfolioStore = new PortfolioStore();
+	private historicalPriceService: HistoricalPriceService = new HistoricalPriceService();
+	private dataStream: StockDataStream | null = null;
+
+	private displayCurrency: Currency = "USD";
+	private exchangeRates: Map<string, number> = new Map();
+
+	private dialogMode: DialogMode = "none";
+	private dialogSymbol: string = "";
+	private dialogPrice: string = "";
+	private dialogMessage: string = "";
+	private dialogFetchingPrice: boolean = false;
+	private dialogFetchTimer?: NodeJS.Timeout;
+	private dialogTransactionSymbol: string = "";
+	private dialogTransactionId: string = "";
+	private dialogFocusedField: DialogFocusedField = "monthLt";
+
+	private portfolioHistoryService: PortfolioHistoryService = new PortfolioHistoryService();
+	private graphSelectedRange: GraphRange = "1mo";
+	private graphData: PortfolioHistorySummary | null = null;
+	private graphLoading: boolean = false;
+
+	private selectedTransactionId: string | null = null;
+	private expandedTransactionSymbol: string | null = null;
+
+	private sideEffects = new Subject<SideEffect>();
+
+	async initialize() {
+		try {
+			this.renderer = await createCliRenderer({
+				exitOnCtrlC: true,
+				useMouse: true,
+				autoFocus: true,
+				enableMouseMovement: true,
+			});
+
+			this.headerPanel = new HeaderPanel(
+				this.displayCurrency,
+				this.$sideEffects,
+				() => {
+					this.openSearchDialog();
+				},
+				() => {
+					this.openPortfolioGraphDialog();
+				},
+				() => {
+					this.handleToggleCurrency();
+				}
+			);
+
+			this.summaryPanel = new SummaryPanel();
+
+			this.stockPanel = new StockPanel(
+				this.renderer,
+				this.portfolioStore,
+				getNativeCurrencySymbol(this.displayCurrency),
+				this.displayCurrency,
+				this.expandedSymbols,
+				this.selectedTransactionId,
+				this.dialogMode,
+				this.$sideEffects,
+
+				(symbol: string) => this.openBuyDialog(symbol),
+				(symbol: string) => this.openSellDialog(symbol),
+				(symbol: string) => this.openDeleteConfirmDialog(symbol),
+				(symbol: string, transactionId: string) => this.openDeleteTransactionDialog(symbol, transactionId),
+				() => this.render()
+			);
+
+			this.footerPanel = new FooterPanel(APP_VERSION);
+
+			this.initKeyListeners();
+
+			this.isInitialized = true;
+
+			this.setupResizeHandling();
+		} catch (error) {
+			debugLog(`❌ Failed to initialize OpenTUI renderer: ${error}`);
+			throw error;
+		}
+	}
+
+	/**
+	 * Key bindings
+	 **/
+
+	private initKeyListeners() {
+		this.renderer.prependInputHandler((sequence: string) => {
+			debugLog(`key sequence: ${sequence}`);
+
+			if (
+				!this.isInputFocused() &&
+				sequence === "b" &&
+				this.stockPanel?.selectedStockSymbol &&
+				this.dialogMode === "none"
+			) {
+				const stock = this._marketData?.stocks.find((s) => s.symbol === this.stockPanel?.selectedStockSymbol);
+				if (stock) {
+					this.openBuyDialog(this.stockPanel.selectedStockSymbol);
+				} else {
+					this.stockPanel.selectedStockSymbol = "";
+					if (this.stockPanel) {
+						this.stockPanel.currentSelectedIndex = -1;
+					}
+				}
+
+				return true;
+			}
+
+			if (
+				!this.isInputFocused() &&
+				sequence === "s" &&
+				this.stockPanel?.selectedStockSymbol &&
+				this.dialogMode === "none"
+			) {
+				const stock = this._marketData?.stocks.find((s) => s.symbol === this.stockPanel?.selectedStockSymbol);
+				if (stock) {
+					const pos = this.calculatePositionSummary(this.stockPanel.selectedStockSymbol, 0);
+					if (pos.qty > 0) {
+						this.openSellDialog(this.stockPanel.selectedStockSymbol);
+					}
+				} else {
+					this.stockPanel.selectedStockSymbol = "";
+					if (this.stockPanel) {
+						this.stockPanel.currentSelectedIndex = -1;
+					}
+				}
+
+				return true;
+			}
+
+			if (
+				!this.isInputFocused() &&
+				sequence === "o" &&
+				this.stockPanel?.selectedStockSymbol &&
+				this.dialogMode === "none"
+			) {
+				if (this.expandedSymbols.has(this.stockPanel.selectedStockSymbol)) {
+					this.expandedSymbols.delete(this.stockPanel.selectedStockSymbol);
+				} else {
+					this.expandedSymbols.add(this.stockPanel.selectedStockSymbol);
+				}
+				this.render();
+
+				return true;
+			}
+
+			if (
+				!this.isInputFocused() &&
+				sequence === "d" &&
+				this.stockPanel?.selectedStockSymbol &&
+				this.dialogMode === "none"
+			) {
+				const stock = this._marketData?.stocks.find((s) => s.symbol === this.stockPanel?.selectedStockSymbol);
+				if (stock) {
+					this.openDeleteConfirmDialog(this.stockPanel.selectedStockSymbol);
+				} else {
+					this.stockPanel.selectedStockSymbol = "";
+					if (this.stockPanel) {
+						this.stockPanel.currentSelectedIndex = -1;
+					}
+				}
+				return true;
+			}
+
+			if (!this.isInputFocused() && sequence === "h" && this.dialogMode === "none") {
+				this.openHelpDialog();
+				return true;
+			}
+
+			if (!this.isInputFocused() && sequence === "f" && this.dialogMode === "none") {
+				this.openSearchDialog();
+				return true;
+			}
+
+			if (!this.isInputFocused() && sequence === "c" && this.dialogMode === "none") {
+				this.handleToggleCurrency();
+				return true;
+			}
+
+			if (
+				!this.isInputFocused() &&
+				sequence === "x" &&
+				this.selectedTransactionId &&
+				this.dialogMode === "none" &&
+				this.expandedTransactionSymbol
+			) {
+				this.openDeleteTransactionDialog(this.expandedTransactionSymbol, this.selectedTransactionId);
+				return true;
+			}
+
+			return false;
+		});
+
+		(this.renderer as CliRenderer).keyInput?.on("keypress", (key: KeyEvent) => {
+			if (key.name === "escape" && this.dialogMode !== "none") {
+				this.closeDialog();
+			}
+
+			if (key.name === "return" && this.dialogMode === "search") {
+				this._searchPanel?.addStock();
+			}
+
+			if (key.name === "return" && this.dialogMode === "buy") {
+				this.handleConfirmBuy();
+			}
+			if (key.name === "return" && this.dialogMode === "sell") {
+				this.handleConfirmSell();
+			}
+			if (key.name === "return" && this.dialogMode === "delete") {
+				this.confirmDelete();
+			}
+			if (key.name === "return" && this.dialogMode === "deleteTransaction") {
+				this.handleConfirmDeleteTransaction();
+			}
+
+			if (this.dialogMode === "none") {
+				if (key.name === "up") {
+					if (this.stockPanel) {
+						this.stockPanel.moveSelectionUp();
+					}
+				}
+				if (key.name === "down") {
+					this.stockPanel?.moveSelectionDown();
+				}
+			}
+
+			if (this.dialogMode === "search") {
+				if (key.name === "up") {
+					this._searchPanel?.moveSelectionUp();
+				}
+				if (key.name === "down") {
+					this._searchPanel?.moveSelectionDown();
+				}
+			}
+
+			if (this.dialogMode === "buy" || this.dialogMode === "sell") {
+				if (key.name === "left") {
+					this.cycleDialogFocus("left");
+				}
+				if (key.name === "right") {
+					this.cycleDialogFocus("right");
+				}
+				if (key.name === "up") {
+					this.incrementFocusedField();
+				}
+				if (key.name === "down") {
+					this.decrementFocusedField();
+				}
+				if (key.name === "return") {
+					this.actOnFocusedField();
+				}
+			}
+		});
+	}
+
+	private setupResizeHandling() {
+		if (process.stdout?.on) {
+			process.stdout.on("resize", this.handleResize);
+		}
+
+		if (process.on) {
+			process.on("SIGWINCH", this.handleResize);
+		}
+	}
+
+	render() {
+		if (this._marketData) {
+			if (!this.isInitialized) {
+				throw new Error("Renderer not initialized. Call initialize() first.");
+			}
+
+			try {
+				debugLog("Full rendering");
+
+				if (this.stockPanel && this._marketData) {
+					this.stockPanel.marketData = this._marketData;
+				}
+				if (this.headerPanel && this._marketData) {
+					this.headerPanel.marketData = this._marketData;
+				}
+				if (this.summaryPanel && this._marketData) {
+					this.summaryPanel.marketData = this._marketData;
+				}
+
+				this.clearScreen();
+
+				const content = Box(
+					{
+						width: "100%",
+						flexDirection: "column",
+						flexGrow: 1,
+					},
+					this.headerPanel?.render(),
+					this.summaryPanel?.render(),
+					this.stockPanel?.render(),
+					this.footerPanel?.render()
+				);
+
+				this.renderer.root.add(Box({ width: "100%", height: "100%", flexDirection: "column", padding: 1 }, content));
+
+				if (this.dialogMode !== "none") {
+					this.renderer.root.add(
+						Box(
+							{
+								id: "dialog-overlay",
+								position: "absolute",
+								top: 0,
+								left: 0,
+								width: "100%",
+								height: "100%",
+								flexDirection: "row",
+								justifyContent: "center",
+								alignItems: "center",
+								zIndex: 100,
+							},
+							this.dialogMode === "delete"
+								? this.createDeleteConfirmDialog()
+								: this.dialogMode === "deleteTransaction"
+									? this.createDeleteTransactionDialog()
+									: this.dialogMode === "help"
+										? this.createHelpDialog()
+										: this.dialogMode === "search"
+											? this.createSearchDialog()
+											: this.dialogMode === "portfolioGraph"
+												? this.createPortfolioGraphDialog()
+												: this.createTransactionDialog()
+						)
+					);
+				}
+			} catch (e) {
+				debugLog(`${e}`);
+			}
+		}
+	}
+
+	renderLoading(progress?: LoadingProgress) {
+		if (!this.isInitialized) return;
+
+		this.clearScreen();
+
+		const elements = [];
+
+		elements.push(
+			Text({
+				content: "🔄 Loading data...",
+				fg: "#00FF00",
+			})
+		);
+
+		if (progress) {
+			elements.push(
+				Box(
+					{
+						width: "80%",
+						flexDirection: "column",
+						alignItems: "center",
+						marginTop: 2,
+						borderStyle: "single",
+						borderColor: "#333333",
+						padding: 1,
+					},
+					Text({
+						content: `Batch ${progress.currentBatch}/${progress.totalBatches}`,
+						fg: "#FFFFFF",
+					}),
+					Text({
+						content: `Stocks: ${progress.completedStocks}/${progress.totalStocks}`,
+						fg: "#00BFFF",
+					}),
+					Text({
+						content:
+							progress.currentBatchStocks.length > 0
+								? `Processing: ${progress.currentBatchStocks.join(", ")}`
+								: "Waiting for next batch...",
+						fg: "#CCCCCC",
+					}),
+					Box(
+						{
+							flexDirection: "row",
+							gap: 3,
+							marginTop: 1,
+						},
+						Text({
+							content: `✅ Success: ${progress.successCount}`,
+							fg: "#00FF00",
+						}),
+						Text({
+							content: `❌ Errors: ${progress.errorCount}`,
+							fg: "#FF0000",
+						})
+					),
+					Text({
+						content: `Elapsed: ${progress.elapsedTime}s`,
+						fg: "#AAAAAA",
+					})
+				)
+			);
+
+			if (progress.recentErrors.length > 0) {
+				elements.push(
+					Box(
+						{
+							width: "80%",
+							flexDirection: "column",
+							marginTop: 1,
+							borderStyle: "single",
+							borderColor: "#FF0000",
+							padding: 1,
+						},
+						Text({
+							content: "Recent Errors:",
+							fg: "#FF0000",
+						}),
+						...progress.recentErrors.slice(0, 3).map((error: string) =>
+							Text({
+								content: error.length > 60 ? `${error.substring(0, 57)}...` : error,
+								fg: "#FF6B6B",
+							})
+						)
+					)
+				);
+			}
+		}
+
+		elements.push(
+			Box(
+				{
+					marginTop: 2,
+					flexDirection: "column",
+					alignItems: "center",
+				},
+				Text({
+					content: "Please wait while we fetch live market data...",
+					fg: "#CCCCCC",
+				}),
+				Text({
+					content: "Press Ctrl+C to cancel",
+					fg: "#AAAAAA",
+				})
+			)
+		);
+
+		this.renderer.root.add(
+			Box(
+				{
+					width: "100%",
+					height: "100%",
+					flexDirection: "column",
+					justifyContent: "center",
+					alignItems: "center",
+					padding: 2,
+				},
+				...elements
+			)
+		);
+	}
+
+	renderError(error: string) {
+		if (!this.isInitialized) return;
+
+		this.clearScreen();
+
+		this.renderer.root.add(
+			Box(
+				{
+					width: "100%",
+					height: "100%",
+					flexDirection: "column",
+					justifyContent: "center",
+					alignItems: "center",
+					padding: 2,
+				},
+				Text({
+					content: "❌ API Connection Failed",
+					fg: "#FF0000",
+				}),
+				Text({
+					content: error,
+					fg: "#FF6B6B",
+				}),
+				Text({
+					content: "Press Ctrl+C to exit",
+					fg: "#CCCCCC",
+				})
+			)
+		);
+	}
+
+	isInputFocused(): boolean {
+		return this.dialogMode !== "none";
+	}
+
+	setupSearchService(searchService: SearchService, onAddStock: (symbol: string, name: string) => void) {
+		this._searchPanel = new SearchPanel(searchService, onAddStock, () => this.render());
+	}
+
+	setStatus(status: AppStatus) {
+		if (this.headerPanel) {
+			this.headerPanel.appStatus = status;
+		}
+		if (this.footerPanel) {
+			this.footerPanel.appStatus = status;
+		}
+	}
+
+	private async refreshPortfolioGraph() {
+		if (this.dialogMode !== "portfolioGraph") return;
+
+		this.graphLoading = true;
+		this.render();
+
+		const positionsWithTransactions = this._positions.filter((p) => p.transactions.length > 0);
+		this.graphData = await this.portfolioHistoryService.getPortfolioHistory(
+			positionsWithTransactions,
+			this.graphSelectedRange,
+			this.displayCurrency,
+			this._marketData,
+			(amount, fromCurrency) => convertPrice(this.exchangeRates, amount, fromCurrency, this.displayCurrency)
+		);
+		this.graphLoading = false;
+		this.render();
+	}
+
+	/**
+	 * Http calls
+	 **/
+
+	async updateExchangeRate() {
+		let apiClient: YahooFinanceClient;
+
+		if (this.dataStream) {
+			apiClient = this.dataStream.getApiClient();
+		} else {
+			apiClient = new YahooFinanceClient();
+		}
+
+		try {
+			this.exchangeRates = await apiClient.fetchExchangeRatesToUSD();
+			this.sideEffects.next({ type: "exchange_rates", data: this.exchangeRates });
+		} catch (error) {
+			debugLog(`updateExchangeRate: error ${error}`);
+		}
+	}
+
+	/**
+	 * Lifecycle
+	 **/
+	destroy() {
+		if (this.isInitialized) {
+			if (this.resizeTimeout) {
+				clearTimeout(this.resizeTimeout);
+			}
+
+			if (process.stdout?.removeListener) {
+				process.stdout.removeListener("resize", this.handleResize);
+			}
+			if (process.removeListener) {
+				process.removeListener("SIGWINCH", this.handleResize);
+			}
+
+			if (this._searchPanel) {
+				this._searchPanel.destroy();
+				this._searchPanel = null;
+			}
+		}
+	}
+
+	private clearScreen() {
+		if (!this.isInitialized) return;
+
+		try {
+			const children = this.renderer.root.getChildren();
+			for (const child of children) {
+				if (child?.id) {
+					try {
+						this.renderer.root.remove(child.id);
+					} catch (e) {
+						debugLog(`${e}`);
+					}
+				}
+			}
+		} catch (e) {
+			debugLog(`${e}`);
+		}
+
+		this.renderer.focusRenderable(this.renderer.root);
+	}
+
+	getPosition(symbol: string): Position | undefined {
+		return this._positions.find((p) => p.symbol === symbol);
+	}
+
+	addSymbol(symbol: string, name: string): void {
+		const existing = this._positions.find((p) => p.symbol === symbol);
+		if (!existing) {
+			this._positions = [...this._positions, { symbol, name, transactions: [] }];
+			this.savePortfolio();
+		}
+	}
+
+	private calculatePositionSummary(symbol: string, currentPrice: number) {
+		const position = this.getPosition(symbol);
+		if (!position || position.transactions.length === 0) {
+			return {
+				qty: 0,
+				totalInvested: 0,
+				avgCost: 0,
+				currentValue: 0,
+				unrealizedPL: 0,
+				unrealizedPLPercent: 0,
+				realizedPL: 0,
+			};
+		}
+
+		return calculatePositionSummary(position.transactions, currentPrice);
+	}
+
+	// ========== Dialog Methods ==========
+
+	private cycleDialogFocus(direction: "left" | "right") {
+		const order: (typeof this.dialogFocusedField)[] = [
+			"monthLt",
+			"monthGt",
+			"dayLt",
+			"dayGt",
+			"yearLt",
+			"yearGt",
+			"qty",
+			"price",
+			"cancel",
+			"ok",
+		];
+		const idx = order.indexOf(this.dialogFocusedField);
+		if (direction === "left") {
+			this.dialogFocusedField = order[(idx - 1 + order.length) % order.length];
+		} else {
+			this.dialogFocusedField = order[(idx + 1) % order.length];
+		}
+		this.render();
+	}
+
+	private incrementFocusedField() {
+		if (!this.transactionDialog) {
+			return;
+		}
+
+		switch (this.dialogFocusedField) {
+			case "monthLt":
+			case "monthGt":
+				this.transactionDialog.incrementMonth();
+				break;
+			case "dayLt":
+			case "dayGt":
+				this.transactionDialog.incrementDay();
+				break;
+			case "yearLt":
+			case "yearGt":
+				this.transactionDialog.incrementYear();
+				break;
+			case "qty":
+			case "price":
+			case "cancel":
+			case "ok":
+				break;
+		}
+	}
+
+	private decrementFocusedField() {
+		if (!this.transactionDialog) {
+			return;
+		}
+		switch (this.dialogFocusedField) {
+			case "monthLt":
+			case "monthGt":
+				this.transactionDialog.decrementMonth();
+				break;
+			case "dayLt":
+			case "dayGt":
+				this.transactionDialog.decrementDay();
+				break;
+			case "yearLt":
+			case "yearGt":
+				this.transactionDialog.decrementYear();
+				break;
+			case "qty":
+			case "price":
+			case "cancel":
+			case "ok":
+				break;
+		}
+	}
+
+	private actOnFocusedField(): void {
+		switch (this.dialogFocusedField) {
+			case "cancel":
+				this.closeDialog();
+				break;
+			case "ok":
+				this.dialogMode === "buy" ? this.handleConfirmBuy() : this.handleConfirmSell();
+				break;
+			case "qty":
+			case "price":
+				break;
+			default:
+				break;
+		}
+	}
+
+	private scheduleDateChangeFetch(): void {
+		if (this.dialogFetchTimer) {
+			clearTimeout(this.dialogFetchTimer);
+		}
+		this.dialogFetchTimer = setTimeout(() => {
+			this.fetchHistoricalPrice();
+		}, 1000);
+	}
+
+	/**
+	 * Dialog visibility / dialog actions
+	 **/
+
+	private openBuyDialog(symbol: string) {
+		this.dialogMode = "buy";
+		this.dialogSymbol = symbol;
+
+		const stock = this._marketData?.stocks.find((s) => s.symbol === symbol);
+		const convertedPrice = stock ? stock.price.amount : 0;
+		this.dialogPrice = convertedPrice > 0 ? convertedPrice.toFixed(2) : "";
+		this.dialogFetchingPrice = false;
+
+		this.render();
+	}
+
+	private openDeleteConfirmDialog(symbol: string): void {
+		this.dialogMode = "delete";
+		this.dialogSymbol = symbol;
+		this.render();
+	}
+
+	private openDeleteTransactionDialog(symbol: string, transactionId: string): void {
+		this.dialogMode = "deleteTransaction";
+		this.dialogTransactionSymbol = symbol;
+		this.dialogTransactionId = transactionId;
+		this.render();
+	}
+
+	private openHelpDialog(): void {
+		this.dialogMode = "help";
+		this.render();
+	}
+
+	private openSearchDialog(): void {
+		this.dialogMode = "search";
+		this.render();
+	}
+
+	private openSellDialog(symbol: string) {
+		this.dialogMode = "sell";
+		this.dialogSymbol = symbol;
+		this.dialogMessage = "";
+
+		const stock = this._marketData?.stocks.find((s) => s.symbol === symbol);
+		const convertedPrice = stock ? stock.price.amount : 0;
+		this.dialogPrice = convertedPrice > 0 ? convertedPrice.toFixed(2) : "";
+		this.dialogFetchingPrice = false;
+
+		this.render();
+	}
+
+	private closeDialog() {
+		this.dialogMode = "none";
+		this.dialogSymbol = "";
+		this.dialogMessage = "";
+		this.selectedTransactionId = null;
+		this.expandedTransactionSymbol = null;
+
+		this.render();
+	}
+
+	private closePortfolioGraphDialog() {
+		this.dialogMode = "none";
+		this.graphData = null;
+		this.render();
+	}
+
+	closeSearchDialog() {
+		this.dialogMode = "none";
+		this.render();
+	}
+
+	createDeleteConfirmDialog() {
+		return new DeleteStockDialog(this.dialogSymbol, this.handleDeleteBySymbol, this.closeDialog).render();
+	}
+
+	confirmDelete() {
+		this.handleDeleteBySymbol(this.dialogSymbol);
+		this.closeDialog();
+	}
+
+	/***
+	 * Action handlers
+	 **/
+
+	private handleDeleteBySymbol(symbol: string) {
+		if (!this._marketData) {
+			return;
+		}
+		const index = this._marketData.stocks.findIndex((s) => s.symbol === symbol);
+
+		if (index !== -1) {
+			const stock = this._marketData.stocks[index];
+			this._marketData.stocks.splice(index, 1);
+			this.sideEffects.next({ type: "delete_symbol", index, stock });
+		}
+
+		if (this.dataStream) {
+			this.dataStream.removeSymbol(symbol);
+		}
+
+		this.render();
+	}
+
+	private handleConfirmBuy() {
+		if (!this.transactionDialog) {
+			return;
+		}
+		const qty = parseInt(this.transactionDialog.quantity, 10);
+
+		const userEnteredPrice = parseFloat(this.dialogPrice);
+
+		if (Number.isNaN(qty) || qty <= 0) {
+			return;
+		}
+		if (Number.isNaN(userEnteredPrice) || userEnteredPrice <= 0) {
+			return;
+		}
+
+		const stock = this._marketData?.stocks.find((s) => s.symbol === this.dialogSymbol);
+		const name = stock?.name || this.dialogSymbol;
+		const dateStr = `${this.transactionDialog.dialogYear}-${String(this.transactionDialog.dialogMonth + 1).padStart(2, "0")}-${String(this.transactionDialog.dialogDay).padStart(2, "0")}`;
+
+		const priceToStore = userEnteredPrice;
+		const currencyToStore = stock?.price.currency || "USD";
+
+		const transaction: Transaction = {
+			id: generateId(),
+			type: "BUY",
+			date: dateStr,
+			qty,
+			pricePerShare: priceToStore,
+			currency: currencyToStore,
+		};
+
+		this._positions = this.portfolioStore.addTransaction(this.dialogSymbol, name, transaction, this._positions);
+		this.sideEffects.next({ type: "portfolio_positions", data: this._positions });
+
+		this.savePortfolio();
+		this.closeDialog();
+	}
+
+	private handleConfirmSell() {
+		if (!this.transactionDialog) {
+			return;
+		}
+		const qty = parseInt(this.transactionDialog.quantity, 10);
+		const userEnteredPrice = parseFloat(this.dialogPrice);
+
+		if (Number.isNaN(qty) || qty <= 0) {
+			return;
+		}
+		if (Number.isNaN(userEnteredPrice) || userEnteredPrice <= 0) {
+			return;
+		}
+
+		const position = this.getPosition(this.dialogSymbol);
+		if (!position) {
+			return;
+		}
+
+		const totalBuys = position.transactions.filter((t) => t.type === "BUY").reduce((sum, t) => sum + t.qty, 0);
+		const totalSells = position.transactions.filter((t) => t.type === "SELL").reduce((sum, t) => sum + t.qty, 0);
+		const currentQty = totalBuys - totalSells;
+
+		if (currentQty < qty) {
+			this.dialogMessage = `Max available: ${currentQty} shares`;
+			this.render();
+			return;
+		}
+
+		const stock = this._marketData?.stocks.find((s) => s.symbol === this.dialogSymbol);
+		const name = stock?.name || this.dialogSymbol;
+		const dateStr = `${this.transactionDialog.dialogYear}-${String(this.transactionDialog.dialogMonth + 1).padStart(2, "0")}-${String(this.transactionDialog.dialogDay).padStart(2, "0")}`;
+
+		const sellPriceToStore = userEnteredPrice;
+		const sellCurrencyToStore = stock?.price.currency || "USD";
+
+		const transaction: Transaction = {
+			id: generateId(),
+			type: "SELL",
+			date: dateStr,
+			qty,
+			pricePerShare: sellPriceToStore,
+			currency: sellCurrencyToStore,
+		};
+
+		this._positions = this.portfolioStore.addTransaction(this.dialogSymbol, name, transaction, this._positions);
+
+		this.sideEffects.next({ type: "portfolio_positions", data: this._positions });
+
+		this.savePortfolio();
+		this.closeDialog();
+	}
+
+	private handleConfirmDeleteTransaction() {
+		if (this.dialogTransactionSymbol && this.dialogTransactionId) {
+			this._positions = this.portfolioStore.removeTransaction(
+				this.dialogTransactionSymbol,
+				this.dialogTransactionId,
+				this._positions
+			);
+			this.savePortfolio();
+			this.selectedTransactionId = null;
+			this.expandedTransactionSymbol = null;
+		}
+		this.closeDialog();
+	}
+
+	private handleToggleCurrency() {
+		this.displayCurrency = this.displayCurrency === "USD" ? "EUR" : "USD";
+
+		this.sideEffects.next({ type: "currency", data: this.displayCurrency });
+
+		if (this.dialogMode === "portfolioGraph") {
+			this.refreshPortfolioGraph();
+		}
+
+		this.render();
+	}
+
+	createDeleteTransactionDialog() {
+		return new DeleteStockTransactionDialog(
+			this.dialogTransactionSymbol,
+			() => {
+				this.handleConfirmDeleteTransaction();
+			},
+			() => {
+				this.closeDialog;
+			}
+		).render();
+	}
+
+	createHelpDialog() {
+		return new HelpDialog(() => this.closeDialog()).render();
+	}
+
+	private getMaxSellQty() {
+		const position = this.getPosition(this.dialogSymbol);
+		if (!position) return 0;
+		const totalBuys = position.transactions.filter((t) => t.type === "BUY").reduce((sum, t) => sum + t.qty, 0);
+		const totalSells = position.transactions.filter((t) => t.type === "SELL").reduce((sum, t) => sum + t.qty, 0);
+		return totalBuys - totalSells;
+	}
+
+	async fetchHistoricalPrice(): Promise<void> {
+		if (!this.dialogSymbol || this.dialogFetchingPrice || !this.transactionDialog) return;
+
+		const dateStr = `${this.transactionDialog.dialogYear}-${String(this.transactionDialog.dialogMonth + 1).padStart(2, "0")}-${String(this.transactionDialog.dialogDay).padStart(2, "0")}`;
+
+		this.dialogFetchingPrice = true;
+		this.render();
+
+		const price = await this.historicalPriceService.getPriceOnDate(this.dialogSymbol, dateStr);
+
+		this.dialogFetchingPrice = false;
+		if (price !== null) {
+			this.dialogPrice = price.toFixed(2);
+		}
+		this.render();
+	}
+
+	// dialog creation
+	private createSearchDialog() {
+		if (this.dialogMode !== "search") return null;
+
+		const searchPanelContent = this._searchPanel ? this._searchPanel.render() : null;
+
+		if (!searchPanelContent) {
+			return Box(
+				{
+					id: "search-dialog-fallback",
+					width: 76,
+					height: 12,
+					flexDirection: "column",
+					borderStyle: "double",
+					borderColor: "#00AAFF",
+					backgroundColor: "#08081a",
+					padding: 1,
+					zIndex: 100,
+				},
+				Text({ content: "🔍 Search not available", fg: "#FF6666" })
+			);
+		}
+
+		return searchPanelContent;
+	}
+
+	private createTransactionDialog() {
+		if (this.dialogMode === "none" || this.dialogMode === "portfolioGraph") return null;
+
+		if (!this.transactionDialog) {
+			this.transactionDialog = new TransactionDialog(
+				this.dialogMode,
+				this.dialogSymbol,
+				this.dialogFetchingPrice,
+				this.dialogPrice,
+				this.dialogFocusedField,
+				this.dialogMessage,
+				this.getMaxSellQty(),
+
+				() => this.closeDialog(),
+				() => this.scheduleDateChangeFetch(),
+				() => this.handleConfirmBuy(),
+				() => this.handleConfirmSell()
+			);
+		}
+
+		this.transactionDialog.price = this.dialogPrice;
+		this.transactionDialog.quantity = "";
+		this.transactionDialog.dialogFocusedField = this.dialogFocusedField;
+
+		return this.transactionDialog.render();
+	}
+
+	async openPortfolioGraphDialog(): Promise<void> {
+		this.dialogMode = "portfolioGraph";
+		this.graphSelectedRange = "1mo";
+		this.graphData = null;
+		this.graphLoading = true;
+		this.render();
+
+		const positionsWithTransactions = this._positions.filter((p) => p.transactions.length > 0);
+		this.graphData = await this.portfolioHistoryService.getPortfolioHistory(
+			positionsWithTransactions,
+			this.graphSelectedRange,
+			this.displayCurrency,
+			this._marketData,
+			(amount, fromCurrency) => convertPrice(this.exchangeRates, amount, fromCurrency, this.displayCurrency)
+		);
+		this.graphLoading = false;
+		this.render();
+	}
+
+	async changeGraphRange(range: GraphRange): Promise<void> {
+		this.graphSelectedRange = range;
+		this.graphLoading = true;
+		this.graphData = null;
+		this.render();
+
+		const positionsWithTransactions = this._positions.filter((p) => p.transactions.length > 0);
+		this.graphData = await this.portfolioHistoryService.getPortfolioHistory(
+			positionsWithTransactions,
+			range,
+			this.displayCurrency,
+			this._marketData,
+			(amount, fromCurrency) => convertPrice(this.exchangeRates, amount, fromCurrency, this.displayCurrency)
+		);
+		this.graphLoading = false;
+		this.render();
+	}
+
+	private createPortfolioGraphDialog() {
+		if (this.dialogMode !== "portfolioGraph") return null;
+
+		return new PortfolioGraphDialog(
+			this.graphSelectedRange,
+			this.graphLoading,
+			this.graphData,
+			this.displayCurrency,
+
+			(range: GraphRange) => this.changeGraphRange(range),
+			() => this.closePortfolioGraphDialog()
+		).render();
+	}
+
+	/**
+	 * Portfolio
+	 **/
+
+	async loadPortfolio() {
+		this._positions = await this.portfolioStore.load();
+
+		this.sideEffects.next({ type: "portfolio_positions", data: this._positions });
+
+		return this._positions;
+	}
+
+	private savePortfolio() {
+		this.portfolioStore.save(this._positions);
+
+		this.sideEffects.next({ type: "portfolio_positions", data: this._positions });
+	}
+
+	/**
+	 * Window resze
+	 **/
+
+	private handleResize = () => {
+		if (this.resizeTimeout) {
+			clearTimeout(this.resizeTimeout);
+		}
+
+		this.resizeTimeout = setTimeout(() => {
+			this.preserveRelativeScrollPosition();
+			this.restoreRelativeScrollPosition();
+		}, 300);
+	};
+
+	preserveRelativeScrollPosition() {}
+
+	restoreRelativeScrollPosition() {}
+
+	set data(marketData: MarketData) {
+		this._marketData = marketData;
+	}
+
+	setDataStream(dataStream: StockDataStream): void {
+		this.dataStream = dataStream;
+	}
+
+	private get $sideEffects(): Observable<SideEffect> {
+		return this.sideEffects.asObservable();
+	}
 }

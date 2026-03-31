@@ -1,198 +1,150 @@
-import { StockDataStream } from './StockDataStream.js';
-import { MarketData, Stock } from '../domain/index.js';
-import { SearchService } from './SearchService.js';
-import { Observable, map, startWith } from 'rxjs';
+import { type Observable, map, startWith } from "rxjs";
+import type { MarketData, Stock } from "../domain/index.js";
+import { SearchService } from "./SearchService.js";
+import { StockDataStream } from "./StockDataStream.js";
 
-/**
- * Main application service coordinating the stock monitoring functionality
- */
 export class StockMonitorApp {
-  private readonly dataStream: StockDataStream;
-  private readonly searchService: SearchService;
-  private isRunning: boolean = false;
+	private readonly dataStream: StockDataStream;
+	private readonly searchService: SearchService;
+	private isRunning: boolean = false;
 
-  constructor() {
-    this.dataStream = new StockDataStream();
-    this.searchService = new SearchService();
-  }
+	constructor() {
+		this.dataStream = new StockDataStream();
+		this.searchService = new SearchService();
+	}
 
-  public getSearchService(): SearchService {
-    return this.searchService;
-  }
+	public getSearchService(): SearchService {
+		return this.searchService;
+	}
 
-  public getDataStream(): StockDataStream {
-    return this.dataStream;
-  }
+	public getDataStream(): StockDataStream {
+		return this.dataStream;
+	}
 
-  public async addStock(symbol: string, name: string): Promise<void> {
-    console.log(`Adding ${symbol} (${name}) to watchlist...`);
-    await this.dataStream.addStock(symbol, name);
-  }
+	public async addStock(symbol: string): Promise<void> {
+		await this.dataStream.addStock(symbol);
+	}
 
-  /**
-   * Start the stock monitoring application
-   */
-  public start(symbols?: string[]): {
-    marketData$: Observable<MarketData>;
-    status$: Observable<AppStatus>;
-    stocks$: Observable<Stock[]>;
-  } {
-    if (this.isRunning) {
-      console.log('🏃 Application already running');
-      return this.getObservables();
-    }
+	public start(symbols?: string[]): {
+		marketData$: Observable<MarketData>;
+		status$: Observable<AppStatus>;
+		stocks$: Observable<Stock[]>;
+	} {
+		if (this.isRunning) {
+			return this.getObservables();
+		}
 
-    console.log('🚀 Starting Stock Monitor...');
-    this.isRunning = true;
+		this.isRunning = true;
 
-    // Set symbols to fetch
-    if (symbols && symbols.length > 0) {
-      this.dataStream.setSymbols(symbols);
-    }
+		if (symbols && symbols.length > 0) {
+			this.dataStream.setSymbols(symbols);
+		}
 
-    // Configure data stream for live updates with 1-minute refresh
-    this.dataStream.setLiveUpdatesEnabled(true);
-    this.dataStream.setRefreshInterval(60000); // 1 minute
-    console.log('📊 Configured for live updates (1-minute refresh interval)');
+		this.dataStream.setLiveUpdatesEnabled(true);
+		this.dataStream.setRefreshInterval(60000);
 
-    // Start the data stream
-    this.dataStream.start();
+		this.dataStream.start();
 
-    return this.getObservables();
-  }
+		return this.getObservables();
+	}
 
-  /**
-   * Stop the application
-   */
-  public stop(): void {
-    console.log('⏹️ Stopping CAC40 Stock Monitor...');
-    this.dataStream.stop();
-    this.isRunning = false;
-  }
+	public stop(): void {
+		this.dataStream.stop();
+		this.isRunning = false;
+	}
 
-  /**
-   * Get reactive observables for UI consumption
-   */
-  private getObservables() {
-    // Transform market data for different UI needs
-    const marketData$ = this.dataStream.marketData$;
-    
-    const stocks$ = marketData$.pipe(
-      map(data => data.stocks),
-      startWith([])
-    );
+	private getObservables() {
+		const marketData$ = this.dataStream.marketData$;
 
-    const status$ = this.dataStream.status$.pipe(
-      map(status => ({
-        ...status,
-        isRunning: this.isRunning,
-        appTitle: 'Stock Live Monitor'
-      }))
-    );
+		const stocks$ = marketData$.pipe(
+			map((data) => data.stocks),
+			startWith([])
+		);
 
-    return {
-      marketData$,
-      stocks$,
-      status$
-    };
-  }
+		const status$ = this.dataStream.status$.pipe(
+			map((status) => ({
+				...status,
+				isRunning: this.isRunning,
+				appTitle: "Stock Live Monitor",
+			}))
+		);
 
-  /**
-   * Force refresh data
-   */
-  public async refresh(): Promise<void> {
-    return this.dataStream.refresh();
-  }
+		return {
+			marketData$,
+			stocks$,
+			status$,
+		};
+	}
 
-  /**
-   * Update refresh interval
-   */
-  public setRefreshInterval(seconds: number): void {
-    this.dataStream.setRefreshInterval(seconds * 1000);
-  }
+	public async refresh(): Promise<void> {
+		return this.dataStream.refresh();
+	}
 
-  /**
-   * Get current data snapshot
-   */
-  public getCurrentData(): MarketData | null {
-    return this.dataStream.getCurrentData();
-  }
+	public setRefreshInterval(seconds: number): void {
+		this.dataStream.setRefreshInterval(seconds * 1000);
+	}
 
-  /**
-   * Get application statistics
-   */
-  public getStats(): AppStats {
-    const currentData = this.getCurrentData();
-    
-    if (!currentData) {
-      return {
-        totalStocks: 0,
-        gainers: 0,
-        losers: 0,
-        totalVolume: '0',
-        avgChange: 0,
-        sentiment: 'NEUTRAL'
-      };
-    }
+	public getCurrentData(): MarketData | null {
+		return this.dataStream.getCurrentData();
+	}
 
-    const summary = currentData.getSummary();
-    
-    return {
-      totalStocks: summary.totalStocks,
-      gainers: summary.gainers,
-      losers: summary.losers,
-      totalVolume: currentData.formattedTotalVolume,
-      avgChange: Number(summary.averageChange.toFixed(2)),
-      sentiment: summary.sentiment
-    };
-  }
+	public getStats(): AppStats {
+		const currentData = this.getCurrentData();
 
-  /**
-   * Get top movers (most volatile stocks)
-   */
-  public getTopMovers(count: number = 5): Stock[] {
-    const currentData = this.getCurrentData();
-    return currentData ? currentData.getTopMovers(count) : [];
-  }
+		if (!currentData) {
+			return {
+				totalStocks: 0,
+				gainers: 0,
+				losers: 0,
+				totalVolume: "0",
+				avgChange: 0,
+				sentiment: "NEUTRAL",
+			};
+		}
 
-  /**
-   * Sort stocks by criteria
-   */
-  public getSortedStocks(criteria: 'symbol' | 'price' | 'change' | 'percentage' | 'volume' = 'symbol'): Stock[] {
-    const currentData = this.getCurrentData();
-    return currentData ? currentData.sortBy(criteria) : [];
-  }
+		const summary = currentData.getSummary();
 
-  /**
-   * Check if application is ready
-   */
-  public isReady(): boolean {
-    return this.isRunning && this.getCurrentData() !== null;
-  }
+		return {
+			totalStocks: summary.totalStocks,
+			gainers: summary.gainers,
+			losers: summary.losers,
+			totalVolume: currentData.formattedTotalVolume,
+			avgChange: Number(summary.averageChange.toFixed(2)),
+			sentiment: summary.sentiment,
+		};
+	}
+
+	public getTopMovers(count: number = 5): Stock[] {
+		const currentData = this.getCurrentData();
+		return currentData ? currentData.getTopMovers(count) : [];
+	}
+
+	public getSortedStocks(criteria: "symbol" | "price" | "change" | "percentage" | "volume" = "symbol"): Stock[] {
+		const currentData = this.getCurrentData();
+		return currentData ? currentData.sortBy(criteria) : [];
+	}
+
+	public isReady(): boolean {
+		return this.isRunning && this.getCurrentData() !== null;
+	}
 }
 
-/**
- * Application status interface
- */
 export interface AppStatus {
-  isLoading: boolean;
-  hasError: boolean;
-  error: string | null;
-  isConnected: boolean;
-  lastUpdate: Date | null;
-  stockCount: number;
-  isRunning: boolean;
-  appTitle: string;
+	isLoading: boolean;
+	hasError: boolean;
+	error: string | null;
+	isConnected: boolean;
+	lastUpdate: Date | null;
+	stockCount: number;
+	isRunning: boolean;
+	appTitle: string;
 }
 
-/**
- * Application statistics interface  
- */
 export interface AppStats {
-  totalStocks: number;
-  gainers: number;
-  losers: number;
-  totalVolume: string;
-  avgChange: number;
-  sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+	totalStocks: number;
+	gainers: number;
+	losers: number;
+	totalVolume: string;
+	avgChange: number;
+	sentiment: "BULLISH" | "BEARISH" | "NEUTRAL";
 }

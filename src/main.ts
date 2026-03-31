@@ -1,163 +1,144 @@
 #!/usr/bin/env bun
 
-import { StockMonitorApp } from './application/StockMonitorApp.js';
-import { TerminalRenderer, LoadingProgress } from './infrastructure/TerminalRenderer.js';
-import { progressTracker, ProgressUpdate } from './shared/ProgressTracker.js';
-import { combineLatest } from 'rxjs';
+import { StockMonitorApp } from "./application/StockMonitorApp.js";
+import { TerminalRenderer, type LoadingProgress } from "./infrastructure/TerminalRenderer.js";
+import { debugLog } from "./shared/Logger.js";
+import { progressTracker, type ProgressUpdate } from "./shared/ProgressTracker.js";
+import { combineLatest } from "rxjs";
 
-/**
- * Main application entry point
- */
 async function main(): Promise<void> {
-  let app: StockMonitorApp | null = null;
-  let renderer: TerminalRenderer | null = null;
-  let currentProgress: ProgressUpdate | null = null;
+	let app: StockMonitorApp | null = null;
+	let renderer: TerminalRenderer | null = null;
+	let currentProgress: ProgressUpdate | null = null;
 
-  try {
-    // Initialize components
-    app = new StockMonitorApp();
-    renderer = new TerminalRenderer();
-    
-    // Initialize OpenTUI renderer
-    await renderer.initialize();
-    
-    // Set data stream reference for deletion handling
-    renderer.setDataStream(app.getDataStream());
-    
-    // Fetch exchange rate
-    await renderer.updateExchangeRate();
-    
-    // Load saved portfolio first
-    const positions = await renderer.loadPortfolio();
-    const symbols = positions.map(p => p.symbol);
-    
-    // Set up search service
-    const currentApp = app;
-    const currentRenderer = renderer;
-    renderer.setupSearchService(
-      currentApp.getSearchService(),
-      async (symbol: string, name: string) => {
-        currentRenderer.addSymbol(symbol, name);
-        await currentApp.addStock(symbol, name);
-      }
-    );
-    
-    // Set up progress tracking
-    const progressListener = (progress: ProgressUpdate) => {
-      currentProgress = progress;
-      if (renderer) {
-        const loadingProgress: LoadingProgress = {
-          currentBatch: progress.currentBatch,
-          totalBatches: progress.totalBatches,
-          completedStocks: progress.completedStocks,
-          totalStocks: progress.totalStocks,
-          currentBatchStocks: progress.currentSymbol ? 
-            [...progress.currentBatchStocks.filter(s => s !== progress.currentSymbol), `⏳ ${progress.currentSymbol}`] : 
-            progress.currentBatchStocks,
-          successCount: progress.successCount,
-          errorCount: progress.errorCount,
-          recentErrors: progress.recentErrors,
-          elapsedTime: progress.elapsedTime
-        };
-        renderer.renderLoading(loadingProgress);
-      }
-    };
-    
-    progressTracker.addListener(progressListener);
-    
-    // Show initial loading state
-    renderer.renderLoading();
-    
-    // Start the application with saved symbols
-    const { marketData$, status$ } = app.start(symbols);
-    
-    // Subscribe to reactive streams and update UI
-    combineLatest([marketData$, status$]).subscribe({
-      next: async ([marketData, status]) => {
-        try {
-          if (status.isLoading && !marketData) {
-            // Progress will be handled by the progress tracker listener
-            if (!currentProgress) {
-              renderer!.renderLoading();
-            }
-          } else if (status.hasError && status.error) {
-            // Show error state - no fallback data rendering
-            progressTracker.removeListener(progressListener);
-            renderer!.renderError(status.error);
-          } else if (marketData) {
-            // Show actual data (handles empty portfolio too)
-            progressTracker.removeListener(progressListener);
-            renderer!.renderStockTable(marketData, status);
-          }
-        } catch (renderError) {
-          console.error('🎨 Rendering error:', renderError);
-        }
-      },
-      error: (error) => {
-        progressTracker.removeListener(progressListener);
-        console.error('💥 Application error:', error);
-        if (renderer) {
-          renderer.renderError(error.message || 'Unknown error occurred');
-        }
-      }
-    });
+	try {
+		app = new StockMonitorApp();
+		renderer = new TerminalRenderer();
 
-  } catch (error) {
-    console.error('❌ Failed to start application:', error);
-    
-    if (renderer) {
-      renderer.renderError(
-        error instanceof Error ? error.message : 'Failed to initialize application'
-      );
-    }
-    
-    process.exit(1);
-  }
+		await renderer.initialize();
 
-  // Handle graceful shutdown
-  const shutdown = () => {
-    
-    progressTracker.reset();
-    
-    if (app) {
-      app.stop();
-    }
-    
-    if (renderer) {
-      renderer.destroy();
-    }
+		renderer.setDataStream(app.getDataStream());
 
-    process.exit(0);
-  };
+		await renderer.updateExchangeRate();
 
-  // Handle Ctrl+C and other termination signals
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-  process.on('SIGQUIT', shutdown);
-  
-  // Handle uncaught errors
-  process.on('uncaughtException', (error) => {
-    console.error('💥 Uncaught exception:', error);
-    if (renderer) {
-      renderer.renderError('Fatal error: ' + error.message);
-    }
-    setTimeout(() => process.exit(1), 1000);
-  });
+		const positions = await renderer.loadPortfolio();
+		const symbols = positions.map((p) => p.symbol);
 
-  process.on('unhandledRejection', (reason, promise) => {
-    console.error('💥 Unhandled promise rejection:', reason);
-    if (renderer) {
-      renderer.renderError('Promise rejection: ' + String(reason));
-    }
-  });
+		const currentApp = app;
+		const currentRenderer = renderer;
+		renderer.setupSearchService(currentApp.getSearchService(), async (symbol: string, name: string) => {
+			currentRenderer.addSymbol(symbol, name);
+			await currentApp.addStock(symbol);
+		});
+
+		const progressListener = (progress: ProgressUpdate) => {
+			currentProgress = progress;
+			if (renderer) {
+				const loadingProgress: LoadingProgress = {
+					currentBatch: progress.currentBatch,
+					totalBatches: progress.totalBatches,
+					completedStocks: progress.completedStocks,
+					totalStocks: progress.totalStocks,
+					currentBatchStocks: progress.currentSymbol
+						? [
+								...progress.currentBatchStocks.filter((s) => s !== progress.currentSymbol),
+								`⏳ ${progress.currentSymbol}`,
+							]
+						: progress.currentBatchStocks,
+					successCount: progress.successCount,
+					errorCount: progress.errorCount,
+					recentErrors: progress.recentErrors,
+					elapsedTime: progress.elapsedTime,
+				};
+				renderer.renderLoading(loadingProgress);
+			}
+		};
+
+		progressTracker.addListener(progressListener);
+
+		renderer.renderLoading();
+
+		const { marketData$, status$ } = app.start(symbols);
+
+		combineLatest([marketData$, status$]).subscribe({
+			next: async ([marketData, status]) => {
+				try {
+					if (status.isLoading && !marketData && renderer) {
+						if (!currentProgress) {
+							renderer.renderLoading();
+						}
+					} else if (status.hasError && status.error && renderer) {
+						progressTracker.removeListener(progressListener);
+						renderer.renderError(status.error);
+					} else if (marketData && renderer) {
+						progressTracker.removeListener(progressListener);
+						renderer.setStatus(status);
+						if (renderer) {
+							renderer.data = marketData;
+						}
+						renderer?.render();
+					}
+				} catch (renderError) {
+					console.error("🎨 Rendering error:", renderError);
+				}
+			},
+			error: (error) => {
+				progressTracker.removeListener(progressListener);
+				console.error("💥 Application error:", error);
+				if (renderer) {
+					renderer.renderError(error.message || "Unknown error occurred");
+				}
+			},
+		});
+	} catch (error) {
+		console.error("❌ Failed to start application:", error);
+
+		if (renderer) {
+			renderer.renderError(error instanceof Error ? error.message : "Failed to initialize application");
+		}
+
+		process.exit(1);
+	}
+
+	const shutdown = () => {
+		progressTracker.reset();
+
+		if (app) {
+			app.stop();
+		}
+
+		if (renderer) {
+			renderer.destroy();
+		}
+
+		process.exit(0);
+	};
+
+	process.on("SIGINT", shutdown);
+	process.on("SIGTERM", shutdown);
+	process.on("SIGQUIT", shutdown);
+
+	process.on("uncaughtException", (error) => {
+		debugLog(`💥 Uncaught exception: ${error}`);
+		if (renderer) {
+			renderer.renderError(`Fatal error: ${error.message}`);
+		}
+		setTimeout(() => process.exit(1), 1000);
+	});
+
+	process.on("unhandledRejection", (reason) => {
+		debugLog(`💥 Unhandled promise rejection: ${reason}`);
+		if (renderer) {
+			renderer.renderError(`Promise rejection: ${String(reason)}`);
+		}
+	});
 }
 
-// Run the application only if this file is the main module
 if (import.meta.main) {
-  main().catch((error) => {
-    console.error('💥 Fatal startup error:', error);
-    process.exit(1);
-  });
+	main().catch((error) => {
+		debugLog(`💥 Fatal startup error: ${error}`);
+		process.exit(1);
+	});
 }
 
 export { main };

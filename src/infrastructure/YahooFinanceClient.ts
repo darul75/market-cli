@@ -1,432 +1,340 @@
-import axios, { AxiosResponse } from 'axios';
-import { StockData, ApiResponse } from '../domain/index.js';
-import { progressTracker } from '../shared/ProgressTracker.js';
+import axios, { type AxiosResponse } from "axios";
+import type { StockData, ApiResponse } from "../domain/index.js";
+import { progressTracker } from "../shared/ProgressTracker.js";
+import { debugLog } from "../shared/Logger.js";
 
-/**
- * Yahoo Finance API client for fetching stock data using v8 endpoint with smart batching
- */
 export class YahooFinanceClient {
-  private readonly baseUrl = 'https://query1.finance.yahoo.com';
-  private readonly timeout = 10000; // 10 seconds
-  private readonly requestDelay = 800; // 0.8 seconds between requests for reliable fetching
-  private readonly batchSize = 8; // Fetch 8 stocks per batch
-  private readonly batchDelay = 2000; // 2 seconds between batches
-  
-  public symbols: string[] = [];
-  
-  private exchangeRateCache: Map<string, number> = new Map();
-  private exchangeRateTimestamp: number = 0;
-  private readonly exchangeRateTTL = 60000; // Cache rate for 1 minute
+	private readonly baseUrl = "https://query1.finance.yahoo.com";
+	private readonly timeout = 10000;
+	private readonly requestDelay = 800;
+	private readonly batchSize = 8;
+	private readonly batchDelay = 2000;
 
-  /**
-   * Test API connection by fetching a single stock
-   */
-  async testConnection(): Promise<boolean> {
-    try {
-      const testSymbol = this.symbols.length > 0 ? this.symbols[0] : 'AAPL';
-      const data = await this.fetchSingleStock(testSymbol);
-      return data !== null;
-    } catch (error) {
-      console.error('Connection test failed:', error);
-      return false;
-    }
-  }
+	public symbols: string[] = [];
 
-  /**
-   * Fetch stock data for configured symbols using v8/finance/chart endpoint with smart batching
-   * Returns both successful data and list of failed symbols for fallback handling
-   */
-  async fetchStocks(): Promise<ApiResponse & { failedSymbols: string[] }> {
-    try {
-      const symbols = this.symbols;
-      const stockData: StockData[] = [];
-      const failedSymbols: string[] = [];
+	async testConnection(): Promise<boolean> {
+		try {
+			const testSymbol = this.symbols.length > 0 ? this.symbols[0] : "AAPL";
+			const data = await this.fetchSingleStock(testSymbol);
+			return data !== null;
+		} catch (error) {
+			console.error("Connection test failed:", error);
+			return false;
+		}
+	}
 
-      // Initialize progress tracking
-      const batches = this.createBatches(symbols, this.batchSize);
-      progressTracker.startTracking(symbols.length, batches.length);
-      
-      // Process stocks in batches for better performance and reliability
-      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-        const batch = batches[batchIndex];
-        const batchNumber = batchIndex + 1;
-        
-        // Update batch progress
-        progressTracker.updateBatch(batchNumber, batch);
-        
-        // Process stocks in current batch sequentially
-        for (const symbol of batch) {
-          try {
-            // Update current symbol being processed
-            progressTracker.updateCurrentSymbol(symbol);
-            
-            const data = await this.fetchSingleStock(symbol);
-            if (data) {
-              stockData.push(data);
-              progressTracker.addSuccess(symbol);
-            } else {
-              failedSymbols.push(symbol);
-              progressTracker.addError(symbol, 'No data returned from API');
-            }
-            
-            // Add delay between individual requests within batch
-            if (symbol !== batch[batch.length - 1]) {
-              await this.sleep(this.requestDelay);
-            }
-          } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            failedSymbols.push(symbol);
-            progressTracker.addError(symbol, errorMessage);
-            continue; // Skip failed stocks but continue with others
-          }
-        }
-        
-        // Add longer delay between batches (except after the last batch)
-        if (batchIndex < batches.length - 1) {
-          await this.sleep(this.batchDelay);
-        }
-      }
+	async fetchStocks(): Promise<ApiResponse & { failedSymbols: string[] }> {
+		try {
+			const symbols = this.symbols;
+			const stockData: StockData[] = [];
+			const failedSymbols: string[] = [];
 
-      if (stockData.length === 0 && failedSymbols.length === symbols.length) {
-        throw new Error('No stock data could be fetched from Yahoo Finance API');
-      }
+			const batches = this.createBatches(symbols, this.batchSize);
+			progressTracker.startTracking(symbols.length, batches.length);
 
-      return {
-        success: stockData.length > 0,
-        data: stockData,
-        timestamp: new Date().toISOString(),
-        failedSymbols,
-        error: failedSymbols.length > 0 ? `${failedSymbols.length} stocks failed to fetch` : undefined
-      };
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      return {
-        success: false,
-        data: [],
-        timestamp: new Date().toISOString(),
-        failedSymbols: [...this.symbols],
-        error: `Yahoo Finance API Error: ${errorMessage}`
-      };
-    }
-  }
+			for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+				const batch = batches[batchIndex];
+				const batchNumber = batchIndex + 1;
 
-  /**
-   * Fetch data for a single stock by symbol (public for dynamic additions)
-   */
-  public async fetchSingleStock(symbol: string): Promise<StockData | null> {
-    return this.fetchSingleStockInternal(symbol);
-  }
+				progressTracker.updateBatch(batchNumber, batch);
 
-  /**
-   * Fetch historical price data for a range
-   */
-  public async fetchPriceHistory(symbol: string, range: string, interval: string): Promise<{ date: string; price: number }[]> {
-    try {
-      const now = new Date();
-      let period1: number;
+				for (const symbol of batch) {
+					try {
+						progressTracker.updateCurrentSymbol(symbol);
 
-      switch (range) {
-        case '1d':
-          period1 = Math.floor((now.getTime() - 24 * 60 * 60 * 1000) / 1000);
-          break;
-        case '5d':
-          period1 = Math.floor((now.getTime() - 5 * 24 * 60 * 60 * 1000) / 1000);
-          break;
-        case '1mo':
-          period1 = Math.floor((now.getTime() - 35 * 24 * 60 * 60 * 1000) / 1000);
-          break;
-        case '6mo':
-          period1 = Math.floor((now.getTime() - 190 * 24 * 60 * 60 * 1000) / 1000);
-          break;
-        default:
-          period1 = Math.floor((now.getTime() - 35 * 24 * 60 * 60 * 1000) / 1000);
-      }
+						const data = await this.fetchSingleStock(symbol);
+						if (data) {
+							stockData.push(data);
+							progressTracker.addSuccess();
+						} else {
+							failedSymbols.push(symbol);
+							progressTracker.addError(symbol, "No data returned from API");
+						}
 
-      const period2 = Math.floor(now.getTime() / 1000) + 86400;
+						if (symbol !== batch[batch.length - 1]) {
+							await this.sleep(this.requestDelay);
+						}
+					} catch (error: unknown) {
+						const errorMessage = error instanceof Error ? error.message : "Unknown error";
+						failedSymbols.push(symbol);
+						progressTracker.addError(symbol, errorMessage);
+					}
+				}
 
-      const url = `${this.baseUrl}/v8/finance/chart/${symbol}`;
-      const response: AxiosResponse = await axios.get(url, {
-        timeout: this.timeout,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        },
-        params: {
-          period1,
-          period2,
-          interval,
-          includePrePost: false,
-          events: 'div,splits'
-        }
-      });
+				if (batchIndex < batches.length - 1) {
+					await this.sleep(this.batchDelay);
+				}
+			}
 
-      const chartData = response.data?.chart?.result?.[0];
-      if (!chartData) {
-        console.log(`[YahooFinance] ${symbol} no chart data`);
-        return [];
-      }
+			if (stockData.length === 0 && failedSymbols.length === symbols.length) {
+				throw new Error("No stock data could be fetched from Yahoo Finance API");
+			}
 
-      const timestamps = chartData.timestamp as number[] | undefined;
-      const closes = chartData.indicators?.quote?.[0]?.close as number[] | undefined;
+			return {
+				success: stockData.length > 0,
+				data: stockData,
+				timestamp: new Date().toISOString(),
+				failedSymbols,
+				error: failedSymbols.length > 0 ? `${failedSymbols.length} stocks failed to fetch` : undefined,
+			};
+		} catch (error: unknown) {
+			const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+			return {
+				success: false,
+				data: [],
+				timestamp: new Date().toISOString(),
+				failedSymbols: [...this.symbols],
+				error: `Yahoo Finance API Error: ${errorMessage}`,
+			};
+		}
+	}
 
-      if (!timestamps || !closes) {
-        console.log(`[YahooFinance] ${symbol} no timestamps or closes`);
-        return [];
-      }
+	public async fetchSingleStock(symbol: string): Promise<StockData | null> {
+		return this.fetchSingleStockInternal(symbol);
+	}
 
-      const result: { date: string; price: number }[] = [];
-      for (let i = 0; i < timestamps.length; i++) {
-        if (closes[i] !== null) {
-          const date = new Date(timestamps[i] * 1000);
-          const dateStr = interval === '1d' 
-            ? date.toISOString().split('T')[0]
-            : date.toISOString().split('T')[0];
-          result.push({ date: dateStr, price: closes[i] });
-        }
-      }
+	public async fetchPriceHistory(
+		symbol: string,
+		range: string,
+		interval: string
+	): Promise<{ date: string; price: number }[]> {
+		try {
+			const now = new Date();
+			let period1: number;
 
-      return result;
-    } catch (error) {
-      console.warn(`⚠️ Failed to fetch price history for ${symbol}:`, error);
-      return [];
-    }
-  }
+			switch (range) {
+				case "1d":
+					period1 = Math.floor((now.getTime() - 24 * 60 * 60 * 1000) / 1000);
+					break;
+				case "5d":
+					period1 = Math.floor((now.getTime() - 5 * 24 * 60 * 60 * 1000) / 1000);
+					break;
+				case "1mo":
+					period1 = Math.floor((now.getTime() - 35 * 24 * 60 * 60 * 1000) / 1000);
+					break;
+				case "6mo":
+					period1 = Math.floor((now.getTime() - 190 * 24 * 60 * 60 * 1000) / 1000);
+					break;
+				default:
+					period1 = Math.floor((now.getTime() - 35 * 24 * 60 * 60 * 1000) / 1000);
+			}
 
-  /**
-   * Fetch historical closing price for a specific date
-   */
-  public async fetchHistoricalPrice(symbol: string, date: string): Promise<number | null> {
-    try {
-      const targetDate = new Date(date);
-      const period1 = Math.floor(targetDate.getTime() / 1000);
-      const period2 = period1 + 86400 * 7;
+			const period2 = Math.floor(now.getTime() / 1000) + 86400;
 
-      const url = `${this.baseUrl}/v8/finance/chart/${symbol}`;
+			const url = `${this.baseUrl}/v8/finance/chart/${symbol}`;
+			const response: AxiosResponse = await axios.get(url, {
+				timeout: this.timeout,
+				headers: {
+					"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+				},
+				params: {
+					period1,
+					period2,
+					interval,
+					includePrePost: false,
+					events: "div,splits",
+				},
+			});
 
-      const response: AxiosResponse = await axios.get(url, {
-        timeout: this.timeout,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        },
-        params: {
-          period1,
-          period2,
-          interval: '1d',
-          includePrePost: false,
-          events: 'div,splits'
-        }
-      });
+			const chartData = response.data?.chart?.result?.[0];
+			if (!chartData) {
+				debugLog(`[YahooFinance] ${symbol} no chart data`);
+				return [];
+			}
 
-      const chartData = response.data?.chart?.result?.[0];
-      if (!chartData) {
-        return null;
-      }
+			const timestamps = chartData.timestamp as number[] | undefined;
+			const closes = chartData.indicators?.quote?.[0]?.close as number[] | undefined;
 
-      const timestamps = chartData.timestamp as number[] | undefined;
-      const closes = chartData.indicators?.quote?.[0]?.close as number[] | undefined;
+			if (!timestamps || !closes) {
+				debugLog(`[YahooFinance] ${symbol} no timestamps or closes`);
+				return [];
+			}
 
-      if (!timestamps || !closes) {
-        return null;
-      }
+			const result: { date: string; price: number }[] = [];
+			for (let i = 0; i < timestamps.length; i++) {
+				if (closes[i] !== null) {
+					const date = new Date(timestamps[i] * 1000);
+					const dateStr = interval === "1d" ? date.toISOString().split("T")[0] : date.toISOString().split("T")[0];
+					result.push({ date: dateStr, price: closes[i] });
+				}
+			}
 
-      const targetTimestamp = Math.floor(targetDate.getTime() / 1000);
-      let closestPrice: number | null = null;
-      let closestDiff = Infinity;
+			return result;
+		} catch (error) {
+			console.warn(`⚠️ Failed to fetch price history for ${symbol}:`, error);
+			return [];
+		}
+	}
 
-      for (let i = 0; i < timestamps.length; i++) {
-        const diff = Math.abs(timestamps[i] - targetTimestamp);
-        if (diff < closestDiff && closes[i] !== null) {
-          closestDiff = diff;
-          closestPrice = closes[i];
-        }
-      }
+	public async fetchHistoricalPrice(symbol: string, date: string): Promise<number | null> {
+		try {
+			const targetDate = new Date(date);
+			const period1 = Math.floor(targetDate.getTime() / 1000);
+			const period2 = period1 + 86400 * 7;
 
-      return closestPrice;
-    } catch (error) {
-      console.warn(`⚠️ Failed to fetch historical price for ${symbol} on ${date}:`, error);
-      return null;
-    }
-  }
+			const url = `${this.baseUrl}/v8/finance/chart/${symbol}`;
 
-  /**
-   * Fetch data for a single stock using Yahoo Finance v8 chart endpoint
-   */
-  private async fetchSingleStockInternal(symbol: string): Promise<StockData | null> {
-    try {
-      const url = `${this.baseUrl}/v8/finance/chart/${symbol}`;
-      
-      const response: AxiosResponse = await axios.get(url, {
-        timeout: this.timeout,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        },
-        params: {
-          range: '1d',
-          interval: '1m',
-          includePrePost: false,
-          events: 'div,splits'
-        }
-      });
+			const response: AxiosResponse = await axios.get(url, {
+				timeout: this.timeout,
+				headers: {
+					"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+				},
+				params: {
+					period1,
+					period2,
+					interval: "1d",
+					includePrePost: false,
+					events: "div,splits",
+				},
+			});
 
-      // Extract data from v8 endpoint response structure
-      const chartData = response.data?.chart?.result?.[0];
-      if (!chartData) {
-        throw new Error('Invalid response structure from Yahoo Finance');
-      }
+			const chartData = response.data?.chart?.result?.[0];
+			if (!chartData) {
+				return null;
+			}
 
-      const meta = chartData.meta;
-      if (!meta) {
-        throw new Error('Missing metadata in Yahoo Finance response');
-      }
+			const timestamps = chartData.timestamp as number[] | undefined;
+			const closes = chartData.indicators?.quote?.[0]?.close as number[] | undefined;
 
-      // Extract current price and calculate changes
-      const currentPrice = meta.regularMarketPrice || meta.previousClose || 0;
-      const previousClose = meta.previousClose || currentPrice;
+			if (!timestamps || !closes) {
+				return null;
+			}
 
-      // Get volume data
-      const volume = meta.regularMarketVolume || 0;
+			const targetTimestamp = Math.floor(targetDate.getTime() / 1000);
+			let closestPrice: number | null = null;
+			let closestDiff = Infinity;
 
-      return {
-        symbol: symbol,
-        name: meta.longName || meta.shortName || symbol,
-        price: currentPrice,
-        previousClose: previousClose,
-        volume: volume,
-        currency: meta.currency || 'USD'
-      };
+			for (let i = 0; i < timestamps.length; i++) {
+				const diff = Math.abs(timestamps[i] - targetTimestamp);
+				if (diff < closestDiff && closes[i] !== null) {
+					closestDiff = diff;
+					closestPrice = closes[i];
+				}
+			}
 
-    } catch (error: unknown) {
-      if (axios.isAxiosError(error)) {
-        if (error.response?.status === 401) {
-          throw new Error(`Unauthorized access (401) for ${symbol}`);
-        } else if (error.response?.status === 404) {
-          throw new Error(`Symbol ${symbol} not found (404)`);
-        } else if (error.response?.status === 429) {
-          throw new Error(`Rate limit exceeded (429) for ${symbol}`);
-        } else {
-          throw new Error(`HTTP ${error.response?.status}: ${error.message}`);
-        }
-      } else if (error instanceof Error && error.message.includes('timeout')) {
-        throw new Error(`Timeout after ${this.timeout}ms for ${symbol}`);
-      } else {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        throw new Error(`Network error for ${symbol}: ${errorMessage}`);
-      }
-    }
-  }
+			return closestPrice;
+		} catch (error) {
+			console.warn(`⚠️ Failed to fetch historical price for ${symbol} on ${date}:`, error);
+			return null;
+		}
+	}
 
-  /**
-   * Create batches from array of symbols
-   */
-  private createBatches<T>(array: T[], batchSize: number): T[][] {
-    const batches: T[][] = [];
-    for (let i = 0; i < array.length; i += batchSize) {
-      batches.push(array.slice(i, i + batchSize));
-    }
-    return batches;
-  }
+	private async fetchSingleStockInternal(symbol: string): Promise<StockData | null> {
+		try {
+			const url = `${this.baseUrl}/v8/finance/chart/${symbol}`;
 
-  /**
-   * Sleep utility for delays
-   */
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
+			const response: AxiosResponse = await axios.get(url, {
+				timeout: this.timeout,
+				headers: {
+					"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+				},
+				params: {
+					range: "1d",
+					interval: "1m",
+					includePrePost: false,
+					events: "div,splits",
+				},
+			});
 
-  /**
-   * Fetch exchange rate between two currencies
-   * Uses Yahoo Finance currency pairs (e.g., EURUSD=X)
-   */
-  async fetchExchangeRate(from: string, to: string): Promise<number> {
-    if (from === to) return 1;
+			const chartData = response.data?.chart?.result?.[0];
+			if (!chartData) {
+				throw new Error("Invalid response structure from Yahoo Finance");
+			}
 
-    const cacheKey = `${from}_${to}`;
-    const now = Date.now();
+			const meta = chartData.meta;
+			if (!meta) {
+				throw new Error("Missing metadata in Yahoo Finance response");
+			}
 
-    // Check cache
-    if (this.exchangeRateCache.has(cacheKey) && 
-        now - this.exchangeRateTimestamp < this.exchangeRateTTL) {
-      return this.exchangeRateCache.get(cacheKey)!;
-    }
+			const currentPrice = meta.regularMarketPrice || meta.previousClose || 0;
+			const previousClose = meta.previousClose || currentPrice;
 
-    try {
-      // For EUR -> USD, use EURUSD=X (gives EUR per 1 USD, so invert)
-      // For USD -> EUR, use EURUSD=X (gives EUR per 1 USD)
-      const pair = from === 'USD' ? `${to}${from}=X` : `${from}${to}=X`;
-      const url = `${this.baseUrl}/v8/finance/chart/${pair}`;
-      
-      const response = await axios.get(url, {
-        timeout: this.timeout,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
+			const volume = meta.regularMarketVolume || 0;
 
-      const chartData = response.data?.chart?.result?.[0];
-      if (!chartData?.meta?.regularMarketPrice) {
-        throw new Error('Invalid exchange rate response');
-      }
+			return {
+				symbol: symbol,
+				name: meta.longName || meta.shortName || symbol,
+				price: currentPrice,
+				previousClose: previousClose,
+				volume: volume,
+				currency: meta.currency || "USD",
+			};
+		} catch (error: unknown) {
+			if (axios.isAxiosError(error)) {
+				if (error.response?.status === 401) {
+					throw new Error(`Unauthorized access (401) for ${symbol}`);
+				} else if (error.response?.status === 404) {
+					throw new Error(`Symbol ${symbol} not found (404)`);
+				} else if (error.response?.status === 429) {
+					throw new Error(`Rate limit exceeded (429) for ${symbol}`);
+				} else {
+					throw new Error(`HTTP ${error.response?.status}: ${error.message}`);
+				}
+			} else if (error instanceof Error && error.message.includes("timeout")) {
+				throw new Error(`Timeout after ${this.timeout}ms for ${symbol}`);
+			} else {
+				const errorMessage = error instanceof Error ? error.message : "Unknown error";
+				throw new Error(`Network error for ${symbol}: ${errorMessage}`);
+			}
+		}
+	}
 
-      let rate = chartData.meta.regularMarketPrice;
-      
-      // If going from EUR to USD, we need to invert (Yahoo gives EUR per USD)
-      if (from === 'EUR' && to === 'USD') {
-        rate = 1 / rate;
-      }
+	private createBatches<T>(array: T[], batchSize: number): T[][] {
+		const batches: T[][] = [];
+		for (let i = 0; i < array.length; i += batchSize) {
+			batches.push(array.slice(i, i + batchSize));
+		}
+		return batches;
+	}
 
-      this.exchangeRateCache.set(cacheKey, rate);
-      this.exchangeRateTimestamp = now;
+	private sleep(ms: number): Promise<void> {
+		return new Promise((resolve) => setTimeout(resolve, ms));
+	}
 
-      return rate;
-    } catch (error) {
-      console.error(`Failed to fetch exchange rate ${from}->${to}:`, error);
-      return 1;
-    }
-  }
+	/**
+	 * Fetch multiple exchange rates with USD as reference
+	 * Returns map: currency code -> rate (USD per 1 unit of currency)
+	 * e.g., { EUR: 0.86, JPY: 0.0067, GBP: 1.27 }
+	 *
+	 * Yahoo pairs: USD{currency}=X gives "USD per 1 {currency}"
+	 * - USDEUR=X → 1 EUR = 0.86 USD
+	 * - USDJPY=X → 1 JPY = 0.0067 USD
+	 */
+	async fetchExchangeRatesToUSD(): Promise<Map<string, number>> {
+		const rates = new Map<string, number>();
+		const currencies = ["ARS", "EUR", "GBp", "JPY", "GBP", "CHF", "CAD", "AUD", "MXN", "NGN", "CLP", "THB", "USX"];
 
-  /**
-   * Fetch multiple exchange rates with USD as reference
-   * Returns map: currency code -> rate (USD per 1 unit of currency)
-   * e.g., { EUR: 0.86, JPY: 0.0067, GBP: 1.27 }
-   * 
-   * Yahoo pairs: USD{currency}=X gives "USD per 1 {currency}"
-   * - USDEUR=X → 1 EUR = 0.86 USD
-   * - USDJPY=X → 1 JPY = 0.0067 USD
-   */
-  async fetchExchangeRatesToUSD(): Promise<Map<string, number>> {
-    const rates = new Map<string, number>();
-    const currencies = ['EUR', 'GBp', 'JPY', 'GBP', 'CHF', 'CAD', 'AUD', 'MXN', 'CLP', 'THB', 'USX'];
-    
-    for (const currency of currencies) {
-      try {
-        // Use USD{currency}=X to get "USD per 1 {currency}"
-        // e.g., USDEUR=X gives EUR to USD rate
-        const pair = `USD${currency}=X`;
-        const url = `${this.baseUrl}/v8/finance/chart/${pair}`;
-        
-        const response = await axios.get(url, {
-          timeout: this.timeout,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          }
-        });
+		for (const currency of currencies) {
+			try {
+				// Use USD{currency}=X to get "USD per 1 {currency}"
+				// e.g., USDEUR=X gives EUR to USD rate
+				const pair = `USD${currency}=X`;
+				const url = `${this.baseUrl}/v8/finance/chart/${pair}`;
 
-        const chartData = response.data?.chart?.result?.[0];
-        if (!chartData?.meta?.regularMarketPrice) {
-          throw new Error(`Invalid exchange rate response for ${currency}`);
-        }
+				const response = await axios.get(url, {
+					timeout: this.timeout,
+					headers: {
+						"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+					},
+				});
 
-        // USD{currency}=X always returns "currency units per USD"
-        // We need "USD per currency unit", so always invert
-        let rate = chartData.meta.regularMarketPrice;
-        rate = 1 / rate; // Always invert for USD{currency}=X format
-        
-        rates.set(currency, rate);
-        console.log(`💱 ${currency}: ${rate} USD per ${currency}`);
-      } catch (error) {
-        console.warn(`Failed to fetch USD${currency} rate:`, error);
-      }
-    }
-    
-    return rates;
-  }
+				const chartData = response.data?.chart?.result?.[0];
+				if (!chartData?.meta?.regularMarketPrice) {
+					throw new Error(`Invalid exchange rate response for ${currency}`);
+				}
+
+				// USD{currency}=X always returns "currency units per USD"
+				// We need "USD per currency unit", so always invert
+				let rate = chartData.meta.regularMarketPrice;
+				rate = 1 / rate; // Always invert for USD{currency}=X format
+
+				rates.set(currency, rate);
+				debugLog(`💱 ${currency}: ${rate} USD per ${currency}`);
+			} catch (error) {
+				console.warn(`Failed to fetch USD${currency} rate:`, error);
+			}
+		}
+
+		return rates;
+	}
 }

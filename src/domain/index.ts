@@ -1,29 +1,28 @@
-// Domain exports
-export { Price } from './Price.js';
-export { Stock } from './Stock.js';
-export { MarketData } from './MarketData.js';
-export type { SearchResult } from './SearchResult.js';
-export type { Position, Transaction, TransactionWithPL, PositionSummary, TransactionType } from './Position.js';
+export { Price } from "./Price.js";
+export { Stock } from "./Stock.js";
+export { MarketData } from "./MarketData.js";
+export type { SearchResult } from "./SearchResult.js";
+export type { Position, Transaction, TransactionWithPL, PositionSummary, TransactionType } from "./Position.js";
 
 // Domain types
 export interface StockData {
-  symbol: string;
-  name: string;
-  price: number;
-  previousClose: number;
-  volume: number;
-  marketCap?: number;
-  currency: string;
+	symbol: string;
+	name: string;
+	price: number;
+	previousClose: number;
+	volume: number;
+	marketCap?: number;
+	currency: string;
 }
 
 export interface ApiResponse {
-  success: boolean;
-  data?: StockData[];
-  error?: string;
-  timestamp: string;
-  failedSymbols?: string[];
+	success: boolean;
+	data?: StockData[];
+	error?: string;
+	timestamp: string;
+	failedSymbols?: string[];
 }
 
-export type SortCriteria = 'symbol' | 'price' | 'change' | 'percentage' | 'volume';
-export type MarketSentiment = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-export type RiskIndicator = 'LOW' | 'MEDIUM' | 'HIGH';
+export type SortCriteria = "symbol" | "price" | "change" | "percentage" | "volume";
+export type MarketSentiment = "BULLISH" | "BEARISH" | "NEUTRAL";
+export type RiskIndicator = "LOW" | "MEDIUM" | "HIGH";
