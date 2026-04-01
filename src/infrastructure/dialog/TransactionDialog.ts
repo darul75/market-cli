@@ -85,7 +85,7 @@ export class TransactionDialog {
 				id: "transaction-dialog",
 				width: 55,
 				flexDirection: "column",
-				borderStyle: "double",
+				borderStyle: "single",
 				borderColor: titleColor,
 				backgroundColor: "#08081a",
 				padding: 1,
@@ -93,7 +93,6 @@ export class TransactionDialog {
 			},
 			Text({ content: title, fg: titleColor }),
 			Box({ width: "100%", height: 1 }),
-
 			Box(
 				{ width: "100%", flexDirection: "row", alignItems: "center", gap: 0 },
 				Text({ content: "Date: ", width: 9, fg: "#888888" }),
@@ -349,6 +348,10 @@ export class TransactionDialog {
 
 	set dialogMode(mode: DialogMode) {
 		this._dialogMode = mode;
+	}
+
+	set dialogSymbol(value: string) {
+		this._dialogSymbol = value;
 	}
 
 	set dialogFocusedField(focusField: DialogFocusedField) {

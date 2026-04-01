@@ -24,7 +24,7 @@ import { StockPanel } from "./stock/StockPanel.js";
 import type { Currency, DialogFocusedField, DialogMode, GraphRange, SideEffect } from "./types.js";
 import { YahooFinanceClient } from "./YahooFinanceClient.js";
 
-const APP_VERSION = "0.3.7";
+const APP_VERSION = "0.3.8";
 const CURRENCIES: Currency[] = ["USD", "EUR", "GBP"];
 
 export class TerminalRenderer {
@@ -1025,6 +1025,9 @@ export class TerminalRenderer {
 		this.transactionDialog.dialogMode = this.dialogMode;
 		this.transactionDialog.price = this.dialogPrice;
 		this.transactionDialog.dialogFocusedField = this.dialogFocusedField;
+		if (this.stockPanel) {
+			this.transactionDialog.dialogSymbol = this.stockPanel.selectedStockSymbol || "";
+		}
 
 		return this.transactionDialog.render();
 	}

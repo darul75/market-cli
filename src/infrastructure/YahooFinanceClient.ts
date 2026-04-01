@@ -1,14 +1,14 @@
 import axios, { type AxiosResponse } from "axios";
-import type { StockData, ApiResponse } from "../domain/index.js";
-import { progressTracker } from "../shared/ProgressTracker.js";
+import { from, mergeMap, type OperatorFunction } from "rxjs";
+import type { ApiResponse, StockData } from "../domain/index.js";
 import { debugLog } from "../shared/Logger.js";
+import { progressTracker } from "../shared/ProgressTracker.js";
 
 export class YahooFinanceClient {
 	private readonly baseUrl = "https://query1.finance.yahoo.com";
 	private readonly timeout = 10000;
-	private readonly requestDelay = 800;
-	private readonly batchSize = 8;
-	private readonly batchDelay = 2000;
+	private readonly requestDelay = 100;
+	private readonly concurrency = 8;
 
 	public symbols: string[] = [];
 
@@ -24,47 +24,41 @@ export class YahooFinanceClient {
 	}
 
 	async fetchStocks(): Promise<ApiResponse & { failedSymbols: string[] }> {
+		const symbols = this.symbols;
+		const stockData: StockData[] = [];
+		const failedSymbols: string[] = [];
+
+		progressTracker.startTracking(symbols.length, Math.ceil(symbols.length / this.concurrency));
+
 		try {
-			const symbols = this.symbols;
-			const stockData: StockData[] = [];
-			const failedSymbols: string[] = [];
-
-			const batches = this.createBatches(symbols, this.batchSize);
-			progressTracker.startTracking(symbols.length, batches.length);
-
-			for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-				const batch = batches[batchIndex];
-				const batchNumber = batchIndex + 1;
-
-				progressTracker.updateBatch(batchNumber, batch);
-
-				for (const symbol of batch) {
-					try {
-						progressTracker.updateCurrentSymbol(symbol);
-
-						const data = await this.fetchSingleStock(symbol);
-						if (data) {
-							stockData.push(data);
-							progressTracker.addSuccess();
-						} else {
-							failedSymbols.push(symbol);
-							progressTracker.addError(symbol, "No data returned from API");
-						}
-
-						if (symbol !== batch[batch.length - 1]) {
-							await this.sleep(this.requestDelay);
-						}
-					} catch (error: unknown) {
-						const errorMessage = error instanceof Error ? error.message : "Unknown error";
-						failedSymbols.push(symbol);
-						progressTracker.addError(symbol, errorMessage);
-					}
-				}
-
-				if (batchIndex < batches.length - 1) {
-					await this.sleep(this.batchDelay);
-				}
-			}
+			await new Promise<void>((resolve) => {
+				from(symbols)
+					.pipe(
+						mergeMap((symbol): Promise<void> => {
+							progressTracker.updateCurrentSymbol(symbol);
+							return (async () => {
+								try {
+									const data = await this.fetchSingleStock(symbol);
+									if (data) {
+										stockData.push(data);
+										progressTracker.addSuccess();
+									} else {
+										failedSymbols.push(symbol);
+										progressTracker.addError(symbol, "No data returned from API");
+									}
+								} catch (error: unknown) {
+									const errorMessage = error instanceof Error ? error.message : "Unknown error";
+									failedSymbols.push(symbol);
+									progressTracker.addError(symbol, errorMessage);
+								}
+								await this.sleep(this.requestDelay);
+							})();
+						}, this.concurrency) as OperatorFunction<string, void>
+					)
+					.subscribe({
+						complete: () => resolve(),
+					});
+			});
 
 			if (stockData.length === 0 && failedSymbols.length === symbols.length) {
 				throw new Error("No stock data could be fetched from Yahoo Finance API");
@@ -278,14 +272,6 @@ export class YahooFinanceClient {
 				throw new Error(`Network error for ${symbol}: ${errorMessage}`);
 			}
 		}
-	}
-
-	private createBatches<T>(array: T[], batchSize: number): T[][] {
-		const batches: T[][] = [];
-		for (let i = 0; i < array.length; i += batchSize) {
-			batches.push(array.slice(i, i + batchSize));
-		}
-		return batches;
 	}
 
 	private sleep(ms: number): Promise<void> {
