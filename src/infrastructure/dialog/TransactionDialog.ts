@@ -347,6 +347,10 @@ export class TransactionDialog {
 		this._price = price;
 	}
 
+	set dialogMode(mode: DialogMode) {
+		this._dialogMode = mode;
+	}
+
 	set dialogFocusedField(focusField: DialogFocusedField) {
 		this._dialogFocusedField = focusField;
 	}

@@ -1022,6 +1022,7 @@ export class TerminalRenderer {
 			);
 		}
 
+		this.transactionDialog.dialogMode = this.dialogMode;
 		this.transactionDialog.price = this.dialogPrice;
 		this.transactionDialog.dialogFocusedField = this.dialogFocusedField;
 
