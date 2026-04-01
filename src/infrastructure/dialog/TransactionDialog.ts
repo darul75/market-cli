@@ -125,10 +125,7 @@ export class TransactionDialog {
 			Box(
 				{ width: "100%", flexDirection: "row", alignItems: "center", gap: 1, height: 1 },
 				Text({ content: "Price: ", width: 7, fg: "#888888" }),
-				Box({ borderStyle: "rounded", paddingLeft: 1, borderColor: "#666666" }, priceInput),
-				!isBuy
-					? Box({ flexDirection: "row" }, Text({ content: ` (max: ${this._maxSaleQty})`, fg: "#666666" }))
-					: Box({})
+				Box({ borderStyle: "rounded", paddingLeft: 1, borderColor: "#666666" }, priceInput)
 			),
 
 			Box({ width: "100%", height: 1 }),
@@ -172,7 +169,11 @@ export class TransactionDialog {
 		);
 	}
 
-	incrementDay(): void {
+	incrementDay() {
+		const previousYear = this._dialogYear;
+		const previousMonth = this._dialogMonth;
+		const previousDay = this._dialogDay;
+
 		const daysInMonth = new Date(this._dialogYear, this._dialogMonth + 1, 0).getDate();
 		this._dialogDay++;
 		if (this._dialogDay > daysInMonth) {
@@ -180,10 +181,21 @@ export class TransactionDialog {
 			this.incrementMonth();
 		}
 
+		if (!this.isDateWithinValidRange()) {
+			this._dialogYear = previousYear;
+			this._dialogMonth = previousMonth;
+			this._dialogDay = previousDay;
+			return;
+		}
+
 		this.scheduleDateChangeFetch();
 	}
 
-	decrementDay(): void {
+	decrementDay() {
+		const previousYear = this._dialogYear;
+		const previousMonth = this._dialogMonth;
+		const previousDay = this._dialogDay;
+
 		const daysInPrevMonth = new Date(this._dialogYear, this._dialogMonth, 0).getDate();
 		this._dialogDay--;
 		if (this._dialogDay < 1) {
@@ -191,10 +203,20 @@ export class TransactionDialog {
 			this.decrementMonth();
 		}
 
+		if (!this.isDateWithinValidRange()) {
+			this._dialogYear = previousYear;
+			this._dialogMonth = previousMonth;
+			this._dialogDay = previousDay;
+			return;
+		}
+
 		this.scheduleDateChangeFetch();
 	}
 
 	incrementMonth() {
+		const previousYear = this._dialogYear;
+		const previousMonth = this._dialogMonth;
+		const previousDay = this._dialogDay;
 		this._dialogMonth++;
 		if (this._dialogMonth > 11) {
 			this._dialogMonth = 0;
@@ -205,30 +227,60 @@ export class TransactionDialog {
 			this._dialogDay = daysInMonth;
 		}
 
+		if (!this.isDateWithinValidRange()) {
+			this._dialogYear = previousYear;
+			this._dialogMonth = previousMonth;
+			this._dialogDay = previousDay;
+			return;
+		}
+
 		this.scheduleDateChangeFetch();
 	}
 
-	incrementYear(): void {
+	incrementYear() {
+		const previousYear = this._dialogYear;
+		const previousMonth = this._dialogMonth;
+		const previousDay = this._dialogDay;
 		this._dialogYear++;
 		const daysInMonth = new Date(this._dialogYear, this._dialogMonth + 1, 0).getDate();
 		if (this._dialogDay > daysInMonth) {
 			this._dialogDay = daysInMonth;
 		}
 
+		if (!this.isDateWithinValidRange()) {
+			this._dialogYear = previousYear;
+			this._dialogMonth = previousMonth;
+			this._dialogDay = previousDay;
+			return;
+		}
+
 		this.scheduleDateChangeFetch();
 	}
 
-	decrementYear(): void {
+	decrementYear() {
+		const previousYear = this._dialogYear;
+		const previousMonth = this._dialogMonth;
+		const previousDay = this._dialogDay;
 		this._dialogYear--;
 		const daysInMonth = new Date(this._dialogYear, this._dialogMonth + 1, 0).getDate();
 		if (this._dialogDay > daysInMonth) {
 			this._dialogDay = daysInMonth;
 		}
 
+		if (!this.isDateWithinValidRange()) {
+			this._dialogYear = previousYear;
+			this._dialogMonth = previousMonth;
+			this._dialogDay = previousDay;
+			return;
+		}
+
 		this.scheduleDateChangeFetch();
 	}
 
 	decrementMonth() {
+		const previousYear = this._dialogYear;
+		const previousMonth = this._dialogMonth;
+		const previousDay = this._dialogDay;
 		this._dialogMonth--;
 		if (this._dialogMonth < 0) {
 			this._dialogMonth = 11;
@@ -239,7 +291,32 @@ export class TransactionDialog {
 			this._dialogDay = daysInMonth;
 		}
 
+		if (!this.isDateWithinValidRange()) {
+			this._dialogYear = previousYear;
+			this._dialogMonth = previousMonth;
+			this._dialogDay = previousDay;
+			return;
+		}
+
 		this.scheduleDateChangeFetch();
+	}
+
+	private getMinDate(): Date {
+		const today = new Date();
+		return new Date(today.getFullYear() - 50, today.getMonth(), today.getDate());
+	}
+	private getMaxDate(): Date {
+		return new Date();
+	}
+	private getCurrentSelectedDate(): Date {
+		return new Date(this._dialogYear, this._dialogMonth, this._dialogDay);
+	}
+
+	private isDateWithinValidRange(): boolean {
+		const selected = this.getCurrentSelectedDate();
+		const min = this.getMinDate();
+		const max = this.getMaxDate();
+		return selected >= min && selected <= max;
 	}
 
 	get quantity() {
@@ -260,6 +337,10 @@ export class TransactionDialog {
 
 	get dialogDay() {
 		return this._dialogDay;
+	}
+
+	get price() {
+		return this._price;
 	}
 
 	set price(price: string) {

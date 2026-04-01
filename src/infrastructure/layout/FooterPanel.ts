@@ -1,19 +1,24 @@
 import { Box, Text } from "@opentui/core";
 import type { AppStatus } from "../../application";
+import type { Observable } from "rxjs";
+import type { SideEffect } from "../types";
 
 export class FooterPanel {
-	private _appStatus: AppStatus | null = null;
+	private appStatus: AppStatus | null = null;
 
-	constructor(private appVersion: string) {}
+	constructor(
+		private appVersion: string,
+		private $sideEffects: Observable<SideEffect>
+	) {
+		this.initListeners();
+	}
 
 	render() {
-		if (!this._appStatus) {
+		if (!this.appStatus) {
 			return Box();
 		}
 
-		const lastUpdate = this._appStatus.lastUpdate
-			? `Last: ${this._appStatus.lastUpdate.toLocaleTimeString()}`
-			: "Never";
+		const lastUpdate = this.appStatus.lastUpdate ? `Last: ${this.appStatus.lastUpdate.toLocaleTimeString()}` : "Never";
 
 		return Box(
 			{
@@ -36,7 +41,15 @@ export class FooterPanel {
 		);
 	}
 
-	set appStatus(status: AppStatus) {
-		this._appStatus = status;
+	private initListeners() {
+		this.$sideEffects.subscribe((value) => {
+			switch (value.type) {
+				case "status":
+					this.appStatus = value.data;
+					break;
+				default:
+					break;
+			}
+		});
 	}
 }

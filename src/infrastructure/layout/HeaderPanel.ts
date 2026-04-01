@@ -8,7 +8,7 @@ import { convertPrice } from "../../shared/CurrencyUtils.js";
 import type { Currency, SideEffect } from "../types.js";
 
 export class HeaderPanel {
-	private _appStatus: AppStatus | null = null;
+	private appStatus: AppStatus | null = null;
 	private _marketData: MarketData | null = null;
 	private _positions: Position[] = [];
 	private _exchangeRates: Map<string, number> = new Map();
@@ -27,7 +27,7 @@ export class HeaderPanel {
 	render() {
 		const portfolioTotal = this.createPortfolioTotalBox();
 
-		if (!this._appStatus) {
+		if (!this.appStatus) {
 			return Box();
 		}
 
@@ -86,8 +86,8 @@ export class HeaderPanel {
 						onMouseDown: () => this.toggleCurrency(),
 					}),
 					Text({
-						content: this.getStatusIndicator(this._appStatus),
-						fg: this._appStatus?.isConnected ? "#00FF00" : "#FF0000",
+						content: this.getStatusIndicator(this.appStatus),
+						fg: this.appStatus?.isConnected ? "#00FF00" : "#FF0000",
 					})
 				)
 			)
@@ -105,8 +105,10 @@ export class HeaderPanel {
 
 	private initListeners() {
 		this.$sideEffects.subscribe((value) => {
-			debugLog(JSON.stringify(value), "HeaderPanel");
 			switch (value.type) {
+				case "status":
+					this.appStatus = value.data;
+					break;
 				case "delete_symbol":
 					this.handleDelete(value.stock);
 					break;
@@ -232,10 +234,6 @@ export class HeaderPanel {
 		if (status.hasError) return "❌ ERROR";
 		if (status.isConnected) return "🟢 LIVE";
 		return "🔴 OFFLINE";
-	}
-
-	set appStatus(status: AppStatus) {
-		this._appStatus = status;
 	}
 
 	set marketData(marketData: MarketData) {

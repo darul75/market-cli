@@ -1,7 +1,17 @@
-/**
- * Global progress tracker for API operations
- */
 export interface ProgressUpdate {
+	currentBatch: number;
+	totalBatches: number;
+	completedStocks: number;
+	totalStocks: number;
+	currentBatchStocks: string[];
+	successCount: number;
+	errorCount: number;
+	recentErrors: string[];
+	elapsedTime: number;
+	currentSymbol?: string;
+}
+
+export interface LoadingProgress {
 	currentBatch: number;
 	totalBatches: number;
 	completedStocks: number;
@@ -71,7 +81,6 @@ class GlobalProgressTracker {
 		this.progress.completedStocks++;
 		this.progress.recentErrors.unshift(`${symbol}: ${error}`);
 
-		// Keep only last 5 errors
 		if (this.progress.recentErrors.length > 5) {
 			this.progress.recentErrors = this.progress.recentErrors.slice(0, 5);
 		}
@@ -122,5 +131,4 @@ class GlobalProgressTracker {
 	}
 }
 
-// Global singleton instance
 export const progressTracker = new GlobalProgressTracker();

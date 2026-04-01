@@ -30,7 +30,8 @@ export class SearchPanel {
 	constructor(
 		searchService: SearchService,
 		onAddStock: (symbol: string, name: string) => void,
-		private onRequestRerender: () => void
+		private onRequestRerender: () => void,
+		private visible: boolean = false
 	) {
 		this._searchService = searchService;
 
@@ -41,19 +42,6 @@ export class SearchPanel {
 		this._resultsTable = new SearchResultsTable(onAddStock);
 
 		this.setupSubscriptions();
-	}
-
-	show() {
-		if (this.state.visible) return;
-
-		this.state.visible = true;
-
-		this.setupSubscriptions();
-
-		this._searchService.clearResults();
-		this.state.query = "";
-		this.state.selectedIndex = -1;
-		this.state.isSearching = false;
 	}
 
 	hide() {
@@ -104,7 +92,9 @@ export class SearchPanel {
 
 			this._resultsTable.updateRows(results, isSearching);
 
-			this.onRequestRerender();
+			if (this.visible) {
+				this.onRequestRerender();
+			}
 		} catch (error) {
 			console.log(error);
 		}
@@ -169,5 +159,9 @@ export class SearchPanel {
 	destroy() {
 		this.cleanupSubscriptions();
 		this.state.visible = false;
+	}
+
+	set updateVisibility(visible: boolean) {
+		this.visible = visible;
 	}
 }

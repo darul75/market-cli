@@ -1,3 +1,4 @@
+import type { AppStatus } from "../application";
 import type { Position, Stock } from "../domain";
 
 export type DialogMode =
@@ -28,9 +29,10 @@ export const SideEffectType = ["delete_symbol", "exchange_rates", "portfolio_pos
 export type SideEffectType = (typeof SideEffectType)[number];
 
 export type SideEffect =
+	| { type: "currency"; data: Currency }
 	| { type: "delete_symbol"; index: number; stock: Stock }
 	| { type: "exchange_rates"; data: Map<string, number> }
 	| { type: "portfolio_positions"; data: Position[] }
-	| { type: "currency"; data: Currency };
+	| { type: "status"; data: AppStatus };
 
-export type Currency = "USD" | "EUR";
+export type Currency = "USD" | "EUR" | "GBP";

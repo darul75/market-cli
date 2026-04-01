@@ -189,6 +189,7 @@ export class YahooFinanceClient {
 			});
 
 			const chartData = response.data?.chart?.result?.[0];
+
 			if (!chartData) {
 				return null;
 			}
@@ -302,7 +303,7 @@ export class YahooFinanceClient {
 	 */
 	async fetchExchangeRatesToUSD(): Promise<Map<string, number>> {
 		const rates = new Map<string, number>();
-		const currencies = ["ARS", "EUR", "GBp", "JPY", "GBP", "CHF", "CAD", "AUD", "MXN", "NGN", "CLP", "THB", "USX"];
+		const currencies = ["ARS", "EUR", "GBp", "JPY", "GBP", "CHF", "CAD", "AUD", "MXN", "NGN", "CLP", "THB"];
 
 		for (const currency of currencies) {
 			try {
@@ -329,7 +330,6 @@ export class YahooFinanceClient {
 				rate = 1 / rate; // Always invert for USD{currency}=X format
 
 				rates.set(currency, rate);
-				debugLog(`💱 ${currency}: ${rate} USD per ${currency}`);
 			} catch (error) {
 				console.warn(`Failed to fetch USD${currency} rate:`, error);
 			}

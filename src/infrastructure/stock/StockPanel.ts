@@ -23,6 +23,7 @@ export class StockPanel {
 	private selectedSymbol: string | null = null;
 	private _positions: Position[] = [];
 	private scrollPosition = 0;
+	private selectedTransactionId: string | null = null;
 
 	constructor(
 		private renderer: CliRenderer,
@@ -30,7 +31,6 @@ export class StockPanel {
 		private displayCurrencySymbol = "$",
 		private _displayCurrency: Currency = "USD",
 		private expandedSymbols: Set<string> = new Set(),
-		private selectedTransactionId: string | null = null,
 		private dialogMode:
 			| "none"
 			| "buy"
@@ -79,7 +79,6 @@ export class StockPanel {
 
 	private initListeners() {
 		this.$sideEffects.subscribe((value) => {
-			debugLog(JSON.stringify(value), "StockPanel");
 			switch (value.type) {
 				case "delete_symbol":
 					this.handleDelete(value.stock);
@@ -355,7 +354,8 @@ export class StockPanel {
 					backgroundColor: isSelected ? "#553300" : "transparent",
 					onMouseDown: (e: MouseEvent) => {
 						e.stopPropagation();
-						this.selectedTransactionId = isSelected ? null : t.id;
+						this.selectedTransactionId = t.id;
+						this.selectedStockSymbol = symbol;
 						this.triggerAppRendering();
 					},
 				},
@@ -623,6 +623,10 @@ export class StockPanel {
 
 	get selectedStockSymbol() {
 		return this.selectedSymbol;
+	}
+
+	get selectedTransactioId() {
+		return this.selectedTransactionId;
 	}
 
 	set selectedStockSymbol(symbol: string | null) {

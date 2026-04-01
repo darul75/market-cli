@@ -83,17 +83,27 @@ export class StockDataStream {
 		lastUpdate: Date | null;
 		stockCount: number;
 	}> {
-		return new Observable((subscriber) => {
+		type StatusType = {
+			isLoading: boolean;
+			hasError: boolean;
+			error: string | null;
+			isConnected: boolean;
+			lastUpdate: Date | null;
+			stockCount: number;
+		};
+		return new Observable<StatusType>((subscriber) => {
 			const emitStatus = () => {
-				const marketData = this.marketDataSubject.value;
-				subscriber.next({
-					isLoading: this.loadingSubject.value,
-					hasError: this.errorSubject.value !== null,
-					error: this.errorSubject.value,
-					isConnected: this.connectionStatusSubject.value,
-					lastUpdate: marketData?.lastUpdate || null,
-					stockCount: marketData?.stocks.length || 0,
-				});
+				setTimeout(() => {
+					const marketData = this.marketDataSubject.value;
+					subscriber.next({
+						isLoading: this.loadingSubject.value,
+						hasError: this.errorSubject.value !== null,
+						error: this.errorSubject.value,
+						isConnected: this.connectionStatusSubject.value,
+						lastUpdate: marketData?.lastUpdate || null,
+						stockCount: marketData?.stocks.length || 0,
+					});
+				}, 0);
 			};
 
 			const subscriptions = [
@@ -109,7 +119,17 @@ export class StockDataStream {
 				subscriptions.forEach((s) => {
 					s.unsubscribe();
 				});
-		});
+		}).pipe(
+			distinctUntilChanged(
+				(prev, curr) =>
+					prev.isLoading === curr.isLoading &&
+					prev.hasError === curr.hasError &&
+					prev.error === curr.error &&
+					prev.isConnected === curr.isConnected &&
+					prev.lastUpdate?.getTime() === curr.lastUpdate?.getTime() &&
+					prev.stockCount === curr.stockCount
+			)
+		);
 	}
 
 	public start() {

@@ -1,7 +1,7 @@
 import type { MarketData } from "../domain/MarketData.js";
 import type { Position, Transaction } from "../domain/Position.js";
 import { HistoricalPriceService, type PricePoint } from "./HistoricalPriceService.js";
-import type { GraphRange } from "./types.js";
+import type { Currency, GraphRange } from "./types.js";
 
 export interface PortfolioValuePoint {
 	date: string;
@@ -28,7 +28,7 @@ export class PortfolioHistoryService {
 	async getPortfolioHistory(
 		positions: Position[],
 		range: GraphRange,
-		displayCurrency?: "USD" | "EUR",
+		displayCurrency?: Currency,
 		marketData?: MarketData | null,
 		currencyConverter?: (amount: number, fromCurrency: string) => number
 	): Promise<PortfolioHistorySummary | null> {

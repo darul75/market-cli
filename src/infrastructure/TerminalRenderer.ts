@@ -1,42 +1,36 @@
-import { createCliRenderer, Box, Text, type CliRenderer, type KeyEvent } from "@opentui/core";
+import { Box, type CliRenderer, createCliRenderer, type KeyEvent, Text } from "@opentui/core";
+import { combineLatest, type Observable, Subject } from "rxjs";
+import { type StockDataStream, StockMonitorApp } from "../application/index.js";
 import type { MarketData, Position, Transaction } from "../domain/index.js";
 import { calculatePositionSummary } from "../domain/PositionCalculator.js";
-import type { AppStatus, SearchService, StockDataStream } from "../application/index.js";
-import { SearchPanel } from "./search/index.js";
-import { PortfolioStore } from "./PortfolioStore.js";
-import { HistoricalPriceService } from "./HistoricalPriceService.js";
-import { PortfolioHistoryService, type PortfolioHistorySummary } from "./PortfolioHistoryService.js";
-import { YahooFinanceClient } from "./YahooFinanceClient.js";
-import { StockPanel } from "./stock/StockPanel.js";
+import { convertPrice, getNativeCurrencySymbol } from "../shared/CurrencyUtils.js";
 import { debugLog } from "../shared/Logger.js";
+import { type LoadingProgress, type ProgressUpdate, progressTracker } from "../shared/ProgressTracker.js";
+import { generateId } from "../shared/Utils.js";
+import { DeleteStockDialog } from "./dialog/DeleteStockDialog.js";
+import { DeleteStockTransactionDialog } from "./dialog/DeleteStockTransactionDialog.js";
+import { HelpDialog } from "./dialog/HelpDialog.js";
+import { PortfolioGraphDialog } from "./dialog/PortfolioDialog.js";
+import { TransactionDialog } from "./dialog/TransactionDialog.js";
+import { HistoricalPriceService } from "./HistoricalPriceService.js";
+import { LoadingScreen } from "./LoadingScreen.js";
+import { FooterPanel } from "./layout/FooterPanel.js";
 import { HeaderPanel } from "./layout/HeaderPanel.js";
 import { SummaryPanel } from "./layout/SummaryPanel.js";
-import { FooterPanel } from "./layout/FooterPanel.js";
-import { convertPrice, getNativeCurrencySymbol } from "../shared/CurrencyUtils.js";
-import { DeleteStockDialog } from "./dialog/DeleteStockDialog.js";
-import { HelpDialog } from "./dialog/HelpDialog.js";
-import { DeleteStockTransactionDialog } from "./dialog/DeleteStockTransactionDialog.js";
+import { PortfolioHistoryService, type PortfolioHistorySummary } from "./PortfolioHistoryService.js";
+import { PortfolioStore } from "./PortfolioStore.js";
+import { SearchPanel } from "./search/index.js";
+import { StockPanel } from "./stock/StockPanel.js";
 import type { Currency, DialogFocusedField, DialogMode, GraphRange, SideEffect } from "./types.js";
-import { TransactionDialog } from "./dialog/TransactionDialog.js";
-import { PortfolioGraphDialog } from "./dialog/PortfolioDialog.js";
-import { type Observable, Subject } from "rxjs";
-import { generateId } from "../shared/Utils.js";
+import { YahooFinanceClient } from "./YahooFinanceClient.js";
 
-const APP_VERSION = "0.3.6";
-
-export interface LoadingProgress {
-	currentBatch: number;
-	totalBatches: number;
-	completedStocks: number;
-	totalStocks: number;
-	currentBatchStocks: string[];
-	successCount: number;
-	errorCount: number;
-	recentErrors: string[];
-	elapsedTime: number;
-}
+const APP_VERSION = "0.3.7";
+const CURRENCIES: Currency[] = ["USD", "EUR", "GBP"];
 
 export class TerminalRenderer {
+	private app: StockMonitorApp = new StockMonitorApp();
+
+	private currentProgress: ProgressUpdate | null = null;
 	private renderer!: CliRenderer;
 	private isInitialized = false;
 	private resizeTimeout?: NodeJS.Timeout;
@@ -46,13 +40,13 @@ export class TerminalRenderer {
 	private summaryPanel: SummaryPanel | null = null;
 	private stockPanel: StockPanel | null = null;
 	private footerPanel: FooterPanel | null = null;
-	private _searchPanel: SearchPanel | null = null;
+	private searchPanel: SearchPanel | null = null;
 
 	private transactionDialog: TransactionDialog | null = null;
 
 	private expandedSymbols: Set<string> = new Set();
 
-	private _positions: Position[] = [];
+	private positions: Position[] = [];
 	private portfolioStore: PortfolioStore = new PortfolioStore();
 	private historicalPriceService: HistoricalPriceService = new HistoricalPriceService();
 	private dataStream: StockDataStream | null = null;
@@ -60,6 +54,7 @@ export class TerminalRenderer {
 	private displayCurrency: Currency = "USD";
 	private exchangeRates: Map<string, number> = new Map();
 
+	// dialogs
 	private dialogMode: DialogMode = "none";
 	private dialogSymbol: string = "";
 	private dialogPrice: string = "";
@@ -75,9 +70,7 @@ export class TerminalRenderer {
 	private graphData: PortfolioHistorySummary | null = null;
 	private graphLoading: boolean = false;
 
-	private selectedTransactionId: string | null = null;
-	private expandedTransactionSymbol: string | null = null;
-
+	// observable events
 	private sideEffects = new Subject<SideEffect>();
 
 	async initialize() {
@@ -88,6 +81,38 @@ export class TerminalRenderer {
 				autoFocus: true,
 				enableMouseMovement: true,
 			});
+
+			this.setDataStream(this.app.getDataStream());
+
+			const positions = await this.loadPortfolio();
+			const symbols = positions.map((p) => p.symbol);
+
+			const { marketData$, status$ } = this.app.start(symbols);
+
+			const progressListener = (progress: ProgressUpdate) => {
+				this.currentProgress = progress;
+
+				const loadingProgress: LoadingProgress = {
+					currentBatch: progress.currentBatch,
+					totalBatches: progress.totalBatches,
+					completedStocks: progress.completedStocks,
+					totalStocks: progress.totalStocks,
+					currentBatchStocks: progress.currentSymbol
+						? [
+								...progress.currentBatchStocks.filter((s) => s !== progress.currentSymbol),
+								`⏳ ${progress.currentSymbol}`,
+							]
+						: progress.currentBatchStocks,
+					successCount: progress.successCount,
+					errorCount: progress.errorCount,
+					recentErrors: progress.recentErrors,
+					elapsedTime: progress.elapsedTime,
+					currentSymbol: progress.currentSymbol,
+				};
+				this.renderLoading(loadingProgress);
+			};
+
+			progressTracker.addListener(progressListener);
 
 			this.headerPanel = new HeaderPanel(
 				this.displayCurrency,
@@ -103,15 +128,12 @@ export class TerminalRenderer {
 				}
 			);
 
-			this.summaryPanel = new SummaryPanel();
-
 			this.stockPanel = new StockPanel(
 				this.renderer,
 				this.portfolioStore,
 				getNativeCurrencySymbol(this.displayCurrency),
 				this.displayCurrency,
 				this.expandedSymbols,
-				this.selectedTransactionId,
 				this.dialogMode,
 				this.$sideEffects,
 
@@ -122,7 +144,55 @@ export class TerminalRenderer {
 				() => this.render()
 			);
 
-			this.footerPanel = new FooterPanel(APP_VERSION);
+			this.searchPanel = new SearchPanel(
+				this.app.getSearchService(),
+				async (symbol: string, name: string) => {
+					this.addSymbol(symbol, name);
+					await this.app.addStock(symbol);
+				},
+				() => this.render()
+			);
+
+			combineLatest([marketData$, status$]).subscribe({
+				next: async ([marketData, status]) => {
+					try {
+						if (status.isLoading && !marketData) {
+							if (!this.currentProgress) {
+								this.renderLoading();
+							}
+						} else if (status.hasError && status.error) {
+							progressTracker.removeListener(progressListener);
+							this.renderError(status.error);
+						} else if (marketData) {
+							progressTracker.removeListener(progressListener);
+
+							this.sideEffects.next({ type: "status", data: status });
+
+							this.data = marketData;
+
+							if (this.exchangeRates.size === 0) {
+								await this.fetchExchangeRates();
+							}
+
+							await this.loadPortfolio();
+
+							this.render();
+						}
+					} catch (renderError) {
+						debugLog(`🎨 Rendering error: ${renderError}`);
+					}
+				},
+				error: (error) => {
+					progressTracker.removeListener(progressListener);
+					debugLog(`💥 Application error: ${error}`);
+
+					this.renderError(error.message || "Unknown error occurred");
+				},
+			});
+
+			this.summaryPanel = new SummaryPanel();
+
+			this.footerPanel = new FooterPanel(APP_VERSION, this.$sideEffects);
 
 			this.initKeyListeners();
 
@@ -143,12 +213,11 @@ export class TerminalRenderer {
 		this.renderer.prependInputHandler((sequence: string) => {
 			debugLog(`key sequence: ${sequence}`);
 
-			if (
-				!this.isInputFocused() &&
-				sequence === "b" &&
-				this.stockPanel?.selectedStockSymbol &&
-				this.dialogMode === "none"
-			) {
+			if (this.isDialogOpened()) {
+				return false;
+			}
+
+			if (sequence === "b" && this.stockPanel?.selectedStockSymbol && this.dialogMode === "none") {
 				const stock = this._marketData?.stocks.find((s) => s.symbol === this.stockPanel?.selectedStockSymbol);
 				if (stock) {
 					this.openBuyDialog(this.stockPanel.selectedStockSymbol);
@@ -162,12 +231,7 @@ export class TerminalRenderer {
 				return true;
 			}
 
-			if (
-				!this.isInputFocused() &&
-				sequence === "s" &&
-				this.stockPanel?.selectedStockSymbol &&
-				this.dialogMode === "none"
-			) {
+			if (sequence === "s" && this.stockPanel?.selectedStockSymbol && this.dialogMode === "none") {
 				const stock = this._marketData?.stocks.find((s) => s.symbol === this.stockPanel?.selectedStockSymbol);
 				if (stock) {
 					const pos = this.calculatePositionSummary(this.stockPanel.selectedStockSymbol, 0);
@@ -184,12 +248,7 @@ export class TerminalRenderer {
 				return true;
 			}
 
-			if (
-				!this.isInputFocused() &&
-				sequence === "o" &&
-				this.stockPanel?.selectedStockSymbol &&
-				this.dialogMode === "none"
-			) {
+			if (sequence === "o" && this.stockPanel?.selectedStockSymbol && this.dialogMode === "none") {
 				if (this.expandedSymbols.has(this.stockPanel.selectedStockSymbol)) {
 					this.expandedSymbols.delete(this.stockPanel.selectedStockSymbol);
 				} else {
@@ -200,12 +259,7 @@ export class TerminalRenderer {
 				return true;
 			}
 
-			if (
-				!this.isInputFocused() &&
-				sequence === "d" &&
-				this.stockPanel?.selectedStockSymbol &&
-				this.dialogMode === "none"
-			) {
+			if (sequence === "d" && this.stockPanel?.selectedStockSymbol && this.dialogMode === "none") {
 				const stock = this._marketData?.stocks.find((s) => s.symbol === this.stockPanel?.selectedStockSymbol);
 				if (stock) {
 					this.openDeleteConfirmDialog(this.stockPanel.selectedStockSymbol);
@@ -218,29 +272,28 @@ export class TerminalRenderer {
 				return true;
 			}
 
-			if (!this.isInputFocused() && sequence === "h" && this.dialogMode === "none") {
+			if (sequence === "h" && this.dialogMode === "none") {
 				this.openHelpDialog();
 				return true;
 			}
 
-			if (!this.isInputFocused() && sequence === "f" && this.dialogMode === "none") {
+			if (sequence === "f" && this.dialogMode === "none") {
 				this.openSearchDialog();
 				return true;
 			}
 
-			if (!this.isInputFocused() && sequence === "c" && this.dialogMode === "none") {
+			if (sequence === "c" && this.dialogMode === "none") {
 				this.handleToggleCurrency();
 				return true;
 			}
 
 			if (
-				!this.isInputFocused() &&
 				sequence === "x" &&
-				this.selectedTransactionId &&
+				this.stockPanel?.selectedTransactioId &&
 				this.dialogMode === "none" &&
-				this.expandedTransactionSymbol
+				this.stockPanel.selectedStockSymbol
 			) {
-				this.openDeleteTransactionDialog(this.expandedTransactionSymbol, this.selectedTransactionId);
+				this.openDeleteTransactionDialog(this.stockPanel.selectedStockSymbol, this.stockPanel?.selectedTransactioId);
 				return true;
 			}
 
@@ -253,7 +306,7 @@ export class TerminalRenderer {
 			}
 
 			if (key.name === "return" && this.dialogMode === "search") {
-				this._searchPanel?.addStock();
+				this.searchPanel?.addStock();
 			}
 
 			if (key.name === "return" && this.dialogMode === "buy") {
@@ -282,10 +335,10 @@ export class TerminalRenderer {
 
 			if (this.dialogMode === "search") {
 				if (key.name === "up") {
-					this._searchPanel?.moveSelectionUp();
+					this.searchPanel?.moveSelectionUp();
 				}
 				if (key.name === "down") {
-					this._searchPanel?.moveSelectionDown();
+					this.searchPanel?.moveSelectionDown();
 				}
 			}
 
@@ -394,121 +447,7 @@ export class TerminalRenderer {
 
 		this.clearScreen();
 
-		const elements = [];
-
-		elements.push(
-			Text({
-				content: "🔄 Loading data...",
-				fg: "#00FF00",
-			})
-		);
-
-		if (progress) {
-			elements.push(
-				Box(
-					{
-						width: "80%",
-						flexDirection: "column",
-						alignItems: "center",
-						marginTop: 2,
-						borderStyle: "single",
-						borderColor: "#333333",
-						padding: 1,
-					},
-					Text({
-						content: `Batch ${progress.currentBatch}/${progress.totalBatches}`,
-						fg: "#FFFFFF",
-					}),
-					Text({
-						content: `Stocks: ${progress.completedStocks}/${progress.totalStocks}`,
-						fg: "#00BFFF",
-					}),
-					Text({
-						content:
-							progress.currentBatchStocks.length > 0
-								? `Processing: ${progress.currentBatchStocks.join(", ")}`
-								: "Waiting for next batch...",
-						fg: "#CCCCCC",
-					}),
-					Box(
-						{
-							flexDirection: "row",
-							gap: 3,
-							marginTop: 1,
-						},
-						Text({
-							content: `✅ Success: ${progress.successCount}`,
-							fg: "#00FF00",
-						}),
-						Text({
-							content: `❌ Errors: ${progress.errorCount}`,
-							fg: "#FF0000",
-						})
-					),
-					Text({
-						content: `Elapsed: ${progress.elapsedTime}s`,
-						fg: "#AAAAAA",
-					})
-				)
-			);
-
-			if (progress.recentErrors.length > 0) {
-				elements.push(
-					Box(
-						{
-							width: "80%",
-							flexDirection: "column",
-							marginTop: 1,
-							borderStyle: "single",
-							borderColor: "#FF0000",
-							padding: 1,
-						},
-						Text({
-							content: "Recent Errors:",
-							fg: "#FF0000",
-						}),
-						...progress.recentErrors.slice(0, 3).map((error: string) =>
-							Text({
-								content: error.length > 60 ? `${error.substring(0, 57)}...` : error,
-								fg: "#FF6B6B",
-							})
-						)
-					)
-				);
-			}
-		}
-
-		elements.push(
-			Box(
-				{
-					marginTop: 2,
-					flexDirection: "column",
-					alignItems: "center",
-				},
-				Text({
-					content: "Please wait while we fetch live market data...",
-					fg: "#CCCCCC",
-				}),
-				Text({
-					content: "Press Ctrl+C to cancel",
-					fg: "#AAAAAA",
-				})
-			)
-		);
-
-		this.renderer.root.add(
-			Box(
-				{
-					width: "100%",
-					height: "100%",
-					flexDirection: "column",
-					justifyContent: "center",
-					alignItems: "center",
-					padding: 2,
-				},
-				...elements
-			)
-		);
+		this.renderer.root.add(new LoadingScreen(progress, this.isInitialized).render());
 	}
 
 	renderError(error: string) {
@@ -542,21 +481,8 @@ export class TerminalRenderer {
 		);
 	}
 
-	isInputFocused(): boolean {
+	isDialogOpened(): boolean {
 		return this.dialogMode !== "none";
-	}
-
-	setupSearchService(searchService: SearchService, onAddStock: (symbol: string, name: string) => void) {
-		this._searchPanel = new SearchPanel(searchService, onAddStock, () => this.render());
-	}
-
-	setStatus(status: AppStatus) {
-		if (this.headerPanel) {
-			this.headerPanel.appStatus = status;
-		}
-		if (this.footerPanel) {
-			this.footerPanel.appStatus = status;
-		}
 	}
 
 	private async refreshPortfolioGraph() {
@@ -565,7 +491,7 @@ export class TerminalRenderer {
 		this.graphLoading = true;
 		this.render();
 
-		const positionsWithTransactions = this._positions.filter((p) => p.transactions.length > 0);
+		const positionsWithTransactions = this.positions.filter((p) => p.transactions.length > 0);
 		this.graphData = await this.portfolioHistoryService.getPortfolioHistory(
 			positionsWithTransactions,
 			this.graphSelectedRange,
@@ -581,7 +507,7 @@ export class TerminalRenderer {
 	 * Http calls
 	 **/
 
-	async updateExchangeRate() {
+	async fetchExchangeRates() {
 		let apiClient: YahooFinanceClient;
 
 		if (this.dataStream) {
@@ -614,10 +540,13 @@ export class TerminalRenderer {
 				process.removeListener("SIGWINCH", this.handleResize);
 			}
 
-			if (this._searchPanel) {
-				this._searchPanel.destroy();
-				this._searchPanel = null;
+			if (this.searchPanel) {
+				this.searchPanel.destroy();
+				this.searchPanel = null;
 			}
+
+			progressTracker.reset();
+			this.app.stop();
 		}
 	}
 
@@ -643,13 +572,13 @@ export class TerminalRenderer {
 	}
 
 	getPosition(symbol: string): Position | undefined {
-		return this._positions.find((p) => p.symbol === symbol);
+		return this.positions.find((p) => p.symbol === symbol);
 	}
 
 	addSymbol(symbol: string, name: string): void {
-		const existing = this._positions.find((p) => p.symbol === symbol);
+		const existing = this.positions.find((p) => p.symbol === symbol);
 		if (!existing) {
-			this._positions = [...this._positions, { symbol, name, transactions: [] }];
+			this.positions = [...this.positions, { symbol, name, transactions: [] }];
 			this.savePortfolio();
 		}
 	}
@@ -827,8 +756,9 @@ export class TerminalRenderer {
 		this.dialogMode = "none";
 		this.dialogSymbol = "";
 		this.dialogMessage = "";
-		this.selectedTransactionId = null;
-		this.expandedTransactionSymbol = null;
+		if (this.transactionDialog) {
+			this.transactionDialog.quantity = "";
+		}
 
 		this.render();
 	}
@@ -880,9 +810,13 @@ export class TerminalRenderer {
 		if (!this.transactionDialog) {
 			return;
 		}
-		const qty = parseInt(this.transactionDialog.quantity, 10);
+		const qtyStr = this.transactionDialog.quantity;
+		if (!/^\d+(\.\d{1,2})?$/.test(qtyStr)) {
+			return;
+		}
+		const qty = parseFloat(qtyStr);
 
-		const userEnteredPrice = parseFloat(this.dialogPrice);
+		const userEnteredPrice = parseFloat(this.transactionDialog.price);
 
 		if (Number.isNaN(qty) || qty <= 0) {
 			return;
@@ -907,8 +841,8 @@ export class TerminalRenderer {
 			currency: currencyToStore,
 		};
 
-		this._positions = this.portfolioStore.addTransaction(this.dialogSymbol, name, transaction, this._positions);
-		this.sideEffects.next({ type: "portfolio_positions", data: this._positions });
+		this.positions = this.portfolioStore.addTransaction(this.dialogSymbol, name, transaction, this.positions);
+		this.sideEffects.next({ type: "portfolio_positions", data: this.positions });
 
 		this.savePortfolio();
 		this.closeDialog();
@@ -918,8 +852,12 @@ export class TerminalRenderer {
 		if (!this.transactionDialog) {
 			return;
 		}
-		const qty = parseInt(this.transactionDialog.quantity, 10);
-		const userEnteredPrice = parseFloat(this.dialogPrice);
+		const qtyStr = this.transactionDialog.quantity;
+		if (!/^\d+(\.\d{1,2})?$/.test(qtyStr)) {
+			return;
+		}
+		const qty = parseFloat(qtyStr);
+		const userEnteredPrice = parseFloat(this.transactionDialog.price);
 
 		if (Number.isNaN(qty) || qty <= 0) {
 			return;
@@ -959,9 +897,9 @@ export class TerminalRenderer {
 			currency: sellCurrencyToStore,
 		};
 
-		this._positions = this.portfolioStore.addTransaction(this.dialogSymbol, name, transaction, this._positions);
+		this.positions = this.portfolioStore.addTransaction(this.dialogSymbol, name, transaction, this.positions);
 
-		this.sideEffects.next({ type: "portfolio_positions", data: this._positions });
+		this.sideEffects.next({ type: "portfolio_positions", data: this.positions });
 
 		this.savePortfolio();
 		this.closeDialog();
@@ -969,20 +907,20 @@ export class TerminalRenderer {
 
 	private handleConfirmDeleteTransaction() {
 		if (this.dialogTransactionSymbol && this.dialogTransactionId) {
-			this._positions = this.portfolioStore.removeTransaction(
+			this.positions = this.portfolioStore.removeTransaction(
 				this.dialogTransactionSymbol,
 				this.dialogTransactionId,
-				this._positions
+				this.positions
 			);
 			this.savePortfolio();
-			this.selectedTransactionId = null;
-			this.expandedTransactionSymbol = null;
 		}
 		this.closeDialog();
 	}
 
 	private handleToggleCurrency() {
-		this.displayCurrency = this.displayCurrency === "USD" ? "EUR" : "USD";
+		const currentIndex = CURRENCIES.indexOf(this.displayCurrency);
+		const nextIndex = (currentIndex + 1) % CURRENCIES.length;
+		this.displayCurrency = CURRENCIES[nextIndex];
 
 		this.sideEffects.next({ type: "currency", data: this.displayCurrency });
 
@@ -1017,7 +955,7 @@ export class TerminalRenderer {
 		return totalBuys - totalSells;
 	}
 
-	async fetchHistoricalPrice(): Promise<void> {
+	async fetchHistoricalPrice() {
 		if (!this.dialogSymbol || this.dialogFetchingPrice || !this.transactionDialog) return;
 
 		const dateStr = `${this.transactionDialog.dialogYear}-${String(this.transactionDialog.dialogMonth + 1).padStart(2, "0")}-${String(this.transactionDialog.dialogDay).padStart(2, "0")}`;
@@ -1038,7 +976,11 @@ export class TerminalRenderer {
 	private createSearchDialog() {
 		if (this.dialogMode !== "search") return null;
 
-		const searchPanelContent = this._searchPanel ? this._searchPanel.render() : null;
+		const searchPanelContent = this.searchPanel ? this.searchPanel.render() : null;
+
+		if (this.searchPanel) {
+			this.searchPanel.updateVisibility = true;
+		}
 
 		if (!searchPanelContent) {
 			return Box(
@@ -1081,20 +1023,19 @@ export class TerminalRenderer {
 		}
 
 		this.transactionDialog.price = this.dialogPrice;
-		this.transactionDialog.quantity = "";
 		this.transactionDialog.dialogFocusedField = this.dialogFocusedField;
 
 		return this.transactionDialog.render();
 	}
 
-	async openPortfolioGraphDialog(): Promise<void> {
+	async openPortfolioGraphDialog() {
 		this.dialogMode = "portfolioGraph";
 		this.graphSelectedRange = "1mo";
 		this.graphData = null;
 		this.graphLoading = true;
 		this.render();
 
-		const positionsWithTransactions = this._positions.filter((p) => p.transactions.length > 0);
+		const positionsWithTransactions = this.positions.filter((p) => p.transactions.length > 0);
 		this.graphData = await this.portfolioHistoryService.getPortfolioHistory(
 			positionsWithTransactions,
 			this.graphSelectedRange,
@@ -1106,13 +1047,13 @@ export class TerminalRenderer {
 		this.render();
 	}
 
-	async changeGraphRange(range: GraphRange): Promise<void> {
+	async changeGraphRange(range: GraphRange) {
 		this.graphSelectedRange = range;
 		this.graphLoading = true;
 		this.graphData = null;
 		this.render();
 
-		const positionsWithTransactions = this._positions.filter((p) => p.transactions.length > 0);
+		const positionsWithTransactions = this.positions.filter((p) => p.transactions.length > 0);
 		this.graphData = await this.portfolioHistoryService.getPortfolioHistory(
 			positionsWithTransactions,
 			range,
@@ -1143,17 +1084,17 @@ export class TerminalRenderer {
 	 **/
 
 	async loadPortfolio() {
-		this._positions = await this.portfolioStore.load();
+		this.positions = await this.portfolioStore.load();
 
-		this.sideEffects.next({ type: "portfolio_positions", data: this._positions });
+		this.sideEffects.next({ type: "portfolio_positions", data: this.positions });
 
-		return this._positions;
+		return this.positions;
 	}
 
 	private savePortfolio() {
-		this.portfolioStore.save(this._positions);
+		this.portfolioStore.save(this.positions);
 
-		this.sideEffects.next({ type: "portfolio_positions", data: this._positions });
+		this.sideEffects.next({ type: "portfolio_positions", data: this.positions });
 	}
 
 	/**
