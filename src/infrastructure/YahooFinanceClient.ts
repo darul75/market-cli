@@ -25,8 +25,9 @@ export class YahooFinanceClient {
 
 	async fetchStocks(): Promise<ApiResponse & { failedSymbols: string[] }> {
 		const symbols = this.symbols;
-		const stockData: StockData[] = [];
+		const stockData: (StockData | null)[] = new Array(symbols.length).fill(null);
 		const failedSymbols: string[] = [];
+		const symbolIndexMap = new Map(symbols.map((s, i) => [s, i]));
 
 		progressTracker.startTracking(symbols.length, Math.ceil(symbols.length / this.concurrency));
 
@@ -39,10 +40,11 @@ export class YahooFinanceClient {
 							return (async () => {
 								try {
 									const data = await this.fetchSingleStock(symbol);
-									if (data) {
-										stockData.push(data);
+									const index = symbolIndexMap.get(symbol);
+									if (index !== undefined && data) {
+										stockData[index] = data;
 										progressTracker.addSuccess();
-									} else {
+									} else if (index !== undefined) {
 										failedSymbols.push(symbol);
 										progressTracker.addError(symbol, "No data returned from API");
 									}
@@ -60,13 +62,15 @@ export class YahooFinanceClient {
 					});
 			});
 
-			if (stockData.length === 0 && failedSymbols.length === symbols.length) {
+			const filteredStockData = stockData.filter((data): data is StockData => data !== null);
+
+			if (filteredStockData.length === 0 && failedSymbols.length === symbols.length) {
 				throw new Error("No stock data could be fetched from Yahoo Finance API");
 			}
 
 			return {
 				success: stockData.length > 0,
-				data: stockData,
+				data: filteredStockData,
 				timestamp: new Date().toISOString(),
 				failedSymbols,
 				error: failedSymbols.length > 0 ? `${failedSymbols.length} stocks failed to fetch` : undefined,

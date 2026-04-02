@@ -1,4 +1,5 @@
 import { Box, Input, InputRenderableEvents, type MouseEvent, Text } from "@opentui/core";
+import type { Transaction } from "../../domain";
 import type { DialogFocusedField, DialogMode } from "../types";
 
 export class TransactionDialog {
@@ -10,6 +11,7 @@ export class TransactionDialog {
 	public fetchingPrice: boolean = false;
 	public dialogFocusedField: DialogFocusedField = "dayLt";
 	public maxSaleQty: number = 0;
+	public editingTransactionId: string | null = null;
 
 	constructor(
 		private _dialogMode: DialogMode,
@@ -18,16 +20,18 @@ export class TransactionDialog {
 		private closeDialog: () => void,
 		private scheduleDateChangeFetch: () => void,
 		private confirmBuy: () => void,
-		private confirmSell: () => void
+		private confirmSell: () => void,
+		private confirmEdit: () => void
 	) {}
 
 	render() {
 		const FOCUS_FG = "#00FFFF";
 
 		const isBuy = this._dialogMode === "buy";
+		const isEdit = this._dialogMode === "edit";
 		const symbol = this._dialogSymbol;
-		const title = isBuy ? `BUY: ${symbol}` : `SELL: ${symbol}`;
-		const titleColor = isBuy ? "#00FF88" : "#FF6666";
+		const title = isEdit ? `EDIT: ${symbol}` : isBuy ? `BUY: ${symbol}` : `SELL: ${symbol}`;
+		const titleColor = isEdit ? "#FFFF00" : isBuy ? "#00FF88" : "#FF6666";
 		const loading = this.fetchingPrice;
 
 		const qtyInput = Input({
@@ -113,7 +117,9 @@ export class TransactionDialog {
 				{ width: "100%", flexDirection: "row", alignItems: "center", gap: 1, height: 1 },
 				Text({ content: "Qty: ", width: 7, fg: "#888888" }),
 				Box({ borderStyle: "rounded", paddingLeft: 1, borderColor: "#666666" }, qtyInput),
-				!isBuy ? Box({ flexDirection: "row" }, Text({ content: ` (max: ${this.maxSaleQty})`, fg: "#666666" })) : Box({})
+				!isBuy && !isEdit
+					? Box({ flexDirection: "row" }, Text({ content: ` (max: ${this.maxSaleQty})`, fg: "#666666" }))
+					: Box({})
 			),
 
 			Box({ width: "100%", height: 2 }),
@@ -156,7 +162,11 @@ export class TransactionDialog {
 							? undefined
 							: (e: MouseEvent) => {
 									e.stopPropagation();
-									isBuy ? this.confirmBuy() : this.confirmSell();
+									if (isEdit) {
+										this.confirmEdit();
+									} else {
+										isBuy ? this.confirmBuy() : this.confirmSell();
+									}
 								},
 					},
 					Text({ content: okBtnText, width: 9, fg: okBtnFg })
@@ -295,6 +305,16 @@ export class TransactionDialog {
 		}
 
 		this.scheduleDateChangeFetch();
+	}
+
+	setForEdit(transaction: Transaction) {
+		this.editingTransactionId = transaction.id;
+		this._quantity = transaction.qty.toString();
+		this.price = transaction.pricePerShare.toString();
+		const [year, month, day] = transaction.date.split("-");
+		this._dialogYear = parseInt(year, 10);
+		this._dialogMonth = parseInt(month, 10) - 1;
+		this._dialogDay = parseInt(day, 10);
 	}
 
 	cycleDialogFocus(direction: "left" | "right") {

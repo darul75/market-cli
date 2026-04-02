@@ -4,11 +4,12 @@ import type { Position, Stock } from "../domain";
 export type DialogMode =
 	| "none"
 	| "buy"
-	| "sell"
-	| "portfolioGraph"
 	| "delete"
-	| "help"
 	| "deleteTransaction"
+	| "edit"
+	| "help"
+	| "portfolioGraph"
+	| "sell"
 	| "search";
 
 export type DialogFocusedField =

@@ -24,7 +24,7 @@ import { StockPanel } from "./stock/StockPanel.js";
 import type { Currency, DialogMode, GraphRange, SideEffect } from "./types.js";
 import { YahooFinanceClient } from "./YahooFinanceClient.js";
 
-const APP_VERSION = "0.3.9";
+const APP_VERSION = "0.4.0";
 const CURRENCIES: Currency[] = ["USD", "EUR", "GBP"];
 
 export class TerminalRenderer {
@@ -57,6 +57,7 @@ export class TerminalRenderer {
 	// dialogs
 	private dialogMode: DialogMode = "none";
 	private dialogFetchTimer: NodeJS.Timeout | null = null;
+	private editingTransaction: Transaction | null = null;
 	private transactionDialog = new TransactionDialog(
 		this.dialogMode,
 		this.stockPanel?.selectedStockSymbol || "",
@@ -65,8 +66,10 @@ export class TerminalRenderer {
 		() => this.closeDialog(),
 		() => this.scheduleDateChangeFetch(),
 		() => this.handleConfirmBuy(),
-		() => this.handleConfirmSell()
+		() => this.handleConfirmSell(),
+		() => this.handleConfirmEdit()
 	);
+
 	private deleteTransactionDialog = new DeleteStockTransactionDialog(
 		"",
 		"",
@@ -151,6 +154,7 @@ export class TerminalRenderer {
 				() => this.openSellDialog(),
 				() => this.openDeleteConfirmDialog(),
 				() => this.openDeleteTransactionDialog(),
+				() => this.openEditTransactionDialog(),
 				() => this.render()
 			);
 
@@ -296,6 +300,18 @@ export class TerminalRenderer {
 				this.handleToggleCurrency();
 				return true;
 			}
+			if (sequence === "e" && this.stockPanel?.selectedStockSymbol && this.dialogMode === "none") {
+				const txIndex = this.stockPanel.selectedTransactionIndex;
+				if (txIndex >= 0) {
+					const position = this.getPosition(this.stockPanel.selectedStockSymbol);
+					if (position) {
+						const tx = position.transactions[txIndex];
+						this.editingTransaction = tx;
+						this.openEditTransactionDialog();
+					}
+				}
+				return true;
+			}
 
 			if (
 				sequence === "x" &&
@@ -331,6 +347,9 @@ export class TerminalRenderer {
 			if (key.name === "return" && this.dialogMode === "deleteTransaction") {
 				this.handleConfirmDeleteTransaction();
 			}
+			if (key.name === "return" && this.dialogMode === "edit") {
+				this.handleConfirmEdit();
+			}
 
 			if (this.dialogMode === "none") {
 				if (key.name === "up") {
@@ -350,7 +369,7 @@ export class TerminalRenderer {
 				}
 			}
 
-			if (this.dialogMode === "buy" || this.dialogMode === "sell") {
+			if (this.dialogMode === "buy" || this.dialogMode === "sell" || this.dialogMode === "edit") {
 				if (key.name === "left") {
 					this.cycleDialogFocus("left");
 				}
@@ -540,7 +559,7 @@ export class TerminalRenderer {
 			abortSignal
 		);
 		this.transactionDialog.fetchingPrice = false;
-		if (price !== null && (this.dialogMode === "buy" || this.dialogMode === "sell")) {
+		if (price !== null && (this.dialogMode === "buy" || this.dialogMode === "sell" || this.dialogMode === "edit")) {
 			this.transactionDialog.price = price.toFixed(2);
 		}
 		this.render();
@@ -722,6 +741,14 @@ export class TerminalRenderer {
 		this.render();
 	}
 
+	private openEditTransactionDialog() {
+		this.dialogMode = "edit";
+		if (this.editingTransaction) {
+			this.transactionDialog.setForEdit(this.editingTransaction);
+		}
+		this.render();
+	}
+
 	private openSearchDialog() {
 		this.dialogMode = "search";
 		this.render();
@@ -732,6 +759,8 @@ export class TerminalRenderer {
 
 		this.transactionDialog.quantity = "";
 		this.transactionDialog.price = "";
+		this.transactionDialog.editingTransactionId = null;
+		this.editingTransaction = null;
 
 		this.render();
 	}
@@ -889,6 +918,45 @@ export class TerminalRenderer {
 		this.sideEffects.next({ type: "portfolio_positions", data: this.positions });
 
 		this.savePortfolio();
+		this.closeDialog();
+	}
+
+	private handleConfirmEdit() {
+		if (!this.transactionDialog || !this.editingTransaction) {
+			return;
+		}
+		const qtyStr = this.transactionDialog.quantity;
+		if (!/^\d+(\.\d{1,2})?$/.test(qtyStr)) {
+			return;
+		}
+		const qty = parseFloat(qtyStr);
+		const userEnteredPrice = parseFloat(this.transactionDialog.price);
+
+		if (Number.isNaN(qty) || qty <= 0) {
+			return;
+		}
+		if (Number.isNaN(userEnteredPrice) || userEnteredPrice <= 0) {
+			return;
+		}
+
+		const dateStr = `${this.transactionDialog.dialogYear}-${String(this.transactionDialog.dialogMonth + 1).padStart(2, "0")}-${String(this.transactionDialog.dialogDay).padStart(2, "0")}`;
+		const symbol = this.stockPanel?.selectedStockSymbol || "";
+
+		this.positions = this.portfolioStore.updateTransaction(
+			symbol,
+			this.editingTransaction.id,
+			{
+				date: dateStr,
+				qty,
+				pricePerShare: userEnteredPrice,
+			},
+			this.positions
+		);
+
+		this.sideEffects.next({ type: "portfolio_positions", data: this.positions });
+		this.savePortfolio();
+		this.editingTransaction = null;
+		this.transactionDialog.editingTransactionId = null;
 		this.closeDialog();
 	}
 

@@ -43,7 +43,7 @@ export class PortfolioStore {
 		}
 	}
 
-	async load(): Promise<Position[]> {
+	async load() {
 		try {
 			if (!fs.existsSync(this.filePath)) {
 				return [];
@@ -97,7 +97,7 @@ export class PortfolioStore {
 		}
 	}
 
-	save(positions: Position[]): void {
+	save(positions: Position[]) {
 		try {
 			const data: PortfolioData = { version: 2, positions };
 			this.ensureDirectoryExists();
@@ -107,11 +107,11 @@ export class PortfolioStore {
 		}
 	}
 
-	getPosition(symbol: string, positions: Position[]): Position | undefined {
+	getPosition(symbol: string, positions: Position[]) {
 		return positions.find((p) => p.symbol === symbol);
 	}
 
-	addTransaction(symbol: string, name: string, transaction: Transaction, positions: Position[]): Position[] {
+	addTransaction(symbol: string, name: string, transaction: Transaction, positions: Position[]) {
 		const index = positions.findIndex((p) => p.symbol === symbol);
 
 		if (index >= 0) {
@@ -126,7 +126,7 @@ export class PortfolioStore {
 		return [...positions, { symbol, name, transactions: [transaction] }];
 	}
 
-	removeTransaction(symbol: string, transactionId: string, positions: Position[]): Position[] {
+	removeTransaction(symbol: string, transactionId: string, positions: Position[]) {
 		const index = positions.findIndex((p) => p.symbol === symbol);
 		if (index < 0) return positions;
 
@@ -143,8 +143,21 @@ export class PortfolioStore {
 		return updated;
 	}
 
-	removePosition(symbol: string, positions: Position[]): Position[] {
+	removePosition(symbol: string, positions: Position[]) {
 		return positions.filter((p) => p.symbol !== symbol);
+	}
+
+	updateTransaction(symbol: string, transactionId: string, updated: Partial<Transaction>, positions: Position[]) {
+		const index = positions.findIndex((p) => p.symbol === symbol);
+		if (index < 0) return positions;
+		const updatedPositions = [...positions];
+		updatedPositions[index] = {
+			...updatedPositions[index],
+			transactions: updatedPositions[index].transactions.map((t) =>
+				t.id === transactionId ? { ...t, ...updated } : t
+			),
+		};
+		return updatedPositions;
 	}
 
 	private ensureDirectoryExists(): void {

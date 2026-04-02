@@ -1,10 +1,10 @@
 import { Box, BoxRenderable, type CliRenderer, type MouseEvent, ScrollBoxRenderable, Text } from "@opentui/core";
+import type { Observable } from "rxjs";
 import type { MarketData, Position, Stock } from "../../domain/index.js";
 import { calculatePositionSummary, calculateTransactionsWithPL } from "../../domain/PositionCalculator.js";
 import { convertPrice, getNativeCurrencySymbol } from "../../shared/CurrencyUtils.js";
 import { debugLog } from "../../shared/Logger.js";
 import type { PortfolioStore } from "../PortfolioStore.js";
-import type { Observable } from "rxjs";
 import type { Currency, SideEffect } from "../types.js";
 
 const HEADER_WIDTH_SYMBOL = 12;
@@ -23,7 +23,7 @@ export class StockPanel {
 	private selectedSymbol: string | null = null;
 	private _positions: Position[] = [];
 	private scrollPosition = 0;
-	private selectedTransactionIndex: number = -1;
+	public selectedTransactionIndex: number = -1;
 	private selectedTransactionId: string | null = null;
 
 	constructor(
@@ -36,6 +36,7 @@ export class StockPanel {
 			| "none"
 			| "buy"
 			| "sell"
+			| "edit"
 			| "portfolioGraph"
 			| "delete"
 			| "help"
@@ -47,6 +48,7 @@ export class StockPanel {
 		private openSellDialog: () => void,
 		private openDeleteConfirmDialog: () => void,
 		private openDeleteTransactionDialog: () => void,
+		private openEditTransactionDialog: () => void,
 		private triggerAppRendering: () => void
 	) {
 		this.initListeners();
@@ -329,7 +331,7 @@ export class StockPanel {
 			return dateStr;
 		};
 
-		const transactionRows = transactionsWithPL.map((t) => {
+		const transactionRows = transactionsWithPL.map((t, idx) => {
 			const isSelected = t.id === this.selectedTransactionId;
 			const plColor = t.pl >= 0 ? "#00FF00" : "#FF0000";
 			const plSign = t.pl >= 0 ? "+" : "";
@@ -369,6 +371,18 @@ export class StockPanel {
 					width: 12,
 					fg: "#FFFFFF",
 				}),
+				Box(
+					{
+						width: 3,
+						onMouseDown: (e: MouseEvent) => {
+							e.stopPropagation();
+							this.selectedTransactionId = t.id;
+							this.selectedTransactionIndex = idx;
+							this.openEditTransactionDialog();
+						},
+					},
+					Text({ content: "✏️", fg: isSelected ? "#00FFFF" : "#444444" })
+				),
 				Box(
 					{
 						width: 3,
