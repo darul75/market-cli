@@ -23,6 +23,7 @@ export class StockPanel {
 	private selectedSymbol: string | null = null;
 	private _positions: Position[] = [];
 	private scrollPosition = 0;
+	private selectedTransactionIndex: number = -1;
 	private selectedTransactionId: string | null = null;
 
 	constructor(
@@ -468,16 +469,38 @@ export class StockPanel {
 		}
 		const stockCount = this._marketData?.stocks.length || 0;
 		if (stockCount === 0) return;
-
-		if (this.selectedIndex < 0) {
-			this.selectedIndex = 0;
-		} else if (this.selectedIndex >= stockCount - 1) {
-			this.selectedIndex = 0;
+		const currentSymbol = this.selectedSymbol || "";
+		const currentPosition = this.getPosition(currentSymbol);
+		const isExpanded = this.expandedSymbols.has(currentSymbol);
+		const hasTransactions = currentPosition && currentPosition.transactions.length > 0;
+		if (isExpanded && hasTransactions) {
+			const txCount = currentPosition?.transactions.length;
+			if (this.selectedTransactionIndex < 0) {
+				this.selectedTransactionIndex = 0;
+				this.selectedTransactionId = currentPosition?.transactions[0].id;
+			} else if (this.selectedTransactionIndex < txCount - 1) {
+				this.selectedTransactionIndex++;
+				this.selectedTransactionId = currentPosition?.transactions[this.selectedTransactionIndex].id;
+			} else {
+				this.selectedTransactionIndex = -1;
+				this.selectedTransactionId = null;
+				if (this.selectedIndex < stockCount - 1) {
+					this.selectedIndex++;
+				} else {
+					this.selectedIndex = 0;
+				}
+				this.selectedSymbol = this._marketData.stocks[this.selectedIndex].symbol;
+			}
 		} else {
-			this.selectedIndex = this.selectedIndex + 1;
+			if (this.selectedIndex < 0) {
+				this.selectedIndex = 0;
+			} else if (this.selectedIndex >= stockCount - 1) {
+				this.selectedIndex = 0;
+			} else {
+				this.selectedIndex++;
+			}
+			this.selectedSymbol = this._marketData.stocks[this.selectedIndex].symbol;
 		}
-		this.selectedSymbol = this._marketData.stocks[this.selectedIndex].symbol;
-
 		this.triggerAppRendering();
 	}
 
@@ -487,14 +510,55 @@ export class StockPanel {
 		}
 		const stockCount = this._marketData?.stocks.length || 0;
 		if (stockCount === 0) return;
-
-		if (this.selectedIndex <= 0) {
-			this.selectedIndex = stockCount - 1;
+		const currentSymbol = this.selectedSymbol || "";
+		const currentPosition = this.getPosition(currentSymbol);
+		const isExpanded = this.expandedSymbols.has(currentSymbol);
+		const hasTransactions = currentPosition && currentPosition.transactions.length > 0;
+		if (isExpanded && hasTransactions) {
+			if (this.selectedTransactionIndex > 0) {
+				this.selectedTransactionIndex--;
+				this.selectedTransactionId = currentPosition?.transactions[this.selectedTransactionIndex].id;
+			} else if (this.selectedTransactionIndex === 0) {
+				this.selectedTransactionIndex = -1;
+				this.selectedTransactionId = null;
+				if (this.selectedIndex > 0) {
+					this.selectedIndex--;
+				} else {
+					this.selectedIndex = stockCount - 1;
+				}
+				this.selectedSymbol = this._marketData.stocks[this.selectedIndex].symbol;
+			} else {
+				if (this.selectedIndex > 0) {
+					this.selectedIndex--;
+				} else {
+					this.selectedIndex = stockCount - 1;
+				}
+				this.selectedSymbol = this._marketData.stocks[this.selectedIndex].symbol;
+				const prevSymbol = this.selectedSymbol;
+				const prevPosition = this.getPosition(prevSymbol);
+				const isPrevExpanded = this.expandedSymbols.has(prevSymbol);
+				const hasPrevTransactions = prevPosition && prevPosition.transactions.length > 0;
+				if (isPrevExpanded && hasPrevTransactions) {
+					this.selectedTransactionIndex = prevPosition?.transactions.length - 1;
+					this.selectedTransactionId = prevPosition?.transactions[this.selectedTransactionIndex].id;
+				}
+			}
 		} else {
-			this.selectedIndex = this.selectedIndex - 1;
+			if (this.selectedIndex > 0) {
+				this.selectedIndex--;
+			} else {
+				this.selectedIndex = stockCount - 1;
+			}
+			this.selectedSymbol = this._marketData.stocks[this.selectedIndex].symbol;
+			const prevSymbol = this.selectedSymbol;
+			const prevPosition = this.getPosition(prevSymbol);
+			const isPrevExpanded = this.expandedSymbols.has(prevSymbol);
+			const hasPrevTransactions = prevPosition && prevPosition.transactions.length > 0;
+			if (isPrevExpanded && hasPrevTransactions) {
+				this.selectedTransactionIndex = prevPosition?.transactions.length - 1;
+				this.selectedTransactionId = prevPosition?.transactions[this.selectedTransactionIndex].id;
+			}
 		}
-		this.selectedSymbol = this._marketData.stocks[this.selectedIndex].symbol;
-
 		this.triggerAppRendering();
 	}
 

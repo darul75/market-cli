@@ -334,9 +334,7 @@ export class TerminalRenderer {
 
 			if (this.dialogMode === "none") {
 				if (key.name === "up") {
-					if (this.stockPanel) {
-						this.stockPanel.moveSelectionUp();
-					}
+					this.stockPanel?.moveSelectionUp();
 				}
 				if (key.name === "down") {
 					this.stockPanel?.moveSelectionDown();
