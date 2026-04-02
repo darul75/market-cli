@@ -160,7 +160,7 @@ export class YahooFinanceClient {
 		}
 	}
 
-	public async fetchHistoricalPrice(symbol: string, date: string): Promise<number | null> {
+	public async fetchHistoricalPrice(symbol: string, date: string, abortSignal?: AbortSignal): Promise<number | null> {
 		try {
 			const targetDate = new Date(date);
 			const period1 = Math.floor(targetDate.getTime() / 1000);
@@ -169,6 +169,7 @@ export class YahooFinanceClient {
 			const url = `${this.baseUrl}/v8/finance/chart/${symbol}`;
 
 			const response: AxiosResponse = await axios.get(url, {
+				signal: abortSignal,
 				timeout: this.timeout,
 				headers: {
 					"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",

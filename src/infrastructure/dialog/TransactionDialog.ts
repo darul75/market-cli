@@ -6,16 +6,15 @@ export class TransactionDialog {
 	private _dialogDay: number = new Date().getDate();
 	private _dialogYear: number = new Date().getFullYear();
 	private _quantity: string = "";
+	public price: string = "";
+	public fetchingPrice: boolean = false;
+	public dialogFocusedField: DialogFocusedField = "dayLt";
+	public maxSaleQty: number = 0;
 
 	constructor(
 		private _dialogMode: DialogMode,
 		private _dialogSymbol: string,
-		private _fetchingPrice: boolean,
-		private _price: string,
-		private _dialogFocusedField: string,
 		private _dialogMessage: string,
-		private _maxSaleQty: number,
-
 		private closeDialog: () => void,
 		private scheduleDateChangeFetch: () => void,
 		private confirmBuy: () => void,
@@ -29,7 +28,7 @@ export class TransactionDialog {
 		const symbol = this._dialogSymbol;
 		const title = isBuy ? `BUY: ${symbol}` : `SELL: ${symbol}`;
 		const titleColor = isBuy ? "#00FF88" : "#FF6666";
-		const loading = this._fetchingPrice;
+		const loading = this.fetchingPrice;
 
 		const qtyInput = Input({
 			width: 10,
@@ -43,9 +42,9 @@ export class TransactionDialog {
 			this._quantity = value;
 		});
 
-		const priceInput = Input({ width: 12, maxLength: 10, placeholder: "0.00", value: this._price });
+		const priceInput = Input({ width: 12, maxLength: 10, placeholder: "0.00", value: this.price });
 		priceInput.on(InputRenderableEvents.INPUT, (value: string) => {
-			this._price = value;
+			this.price = value;
 		});
 
 		const okBtnFg = loading ? "#666666" : "#00FF00";
@@ -55,9 +54,9 @@ export class TransactionDialog {
 			label: string,
 			onClick: () => void,
 			disabled: boolean,
-			focusKey: typeof this._dialogFocusedField
+			focusKey: typeof this.dialogFocusedField
 		) => {
-			const isFocused = this._dialogFocusedField === focusKey && !disabled;
+			const isFocused = this.dialogFocusedField === focusKey && !disabled;
 			const fg = isFocused ? FOCUS_FG : disabled ? "#444444" : "#00AAFF";
 			return Box(
 				{
@@ -114,9 +113,7 @@ export class TransactionDialog {
 				{ width: "100%", flexDirection: "row", alignItems: "center", gap: 1, height: 1 },
 				Text({ content: "Qty: ", width: 7, fg: "#888888" }),
 				Box({ borderStyle: "rounded", paddingLeft: 1, borderColor: "#666666" }, qtyInput),
-				!isBuy
-					? Box({ flexDirection: "row" }, Text({ content: ` (max: ${this._maxSaleQty})`, fg: "#666666" }))
-					: Box({})
+				!isBuy ? Box({ flexDirection: "row" }, Text({ content: ` (max: ${this.maxSaleQty})`, fg: "#666666" })) : Box({})
 			),
 
 			Box({ width: "100%", height: 2 }),
@@ -300,6 +297,71 @@ export class TransactionDialog {
 		this.scheduleDateChangeFetch();
 	}
 
+	cycleDialogFocus(direction: "left" | "right") {
+		const order: (typeof this.dialogFocusedField)[] = [
+			"monthLt",
+			"monthGt",
+			"dayLt",
+			"dayGt",
+			"yearLt",
+			"yearGt",
+			"qty",
+			"price",
+			"cancel",
+			"ok",
+		];
+		const idx = order.indexOf(this.dialogFocusedField);
+		if (direction === "left") {
+			this.dialogFocusedField = order[(idx - 1 + order.length) % order.length];
+		} else {
+			this.dialogFocusedField = order[(idx + 1) % order.length];
+		}
+	}
+
+	incrementFocusedField() {
+		switch (this.dialogFocusedField) {
+			case "monthLt":
+			case "monthGt":
+				this.incrementMonth();
+				break;
+			case "dayLt":
+			case "dayGt":
+				this.incrementDay();
+				break;
+			case "yearLt":
+			case "yearGt":
+				this.incrementYear();
+				break;
+			case "qty":
+			case "price":
+			case "cancel":
+			case "ok":
+				break;
+		}
+	}
+
+	decrementFocusedField() {
+		switch (this.dialogFocusedField) {
+			case "monthLt":
+			case "monthGt":
+				this.decrementMonth();
+				break;
+			case "dayLt":
+			case "dayGt":
+				this.decrementDay();
+				break;
+			case "yearLt":
+			case "yearGt":
+				this.decrementYear();
+				break;
+			case "qty":
+			case "price":
+			case "cancel":
+			case "ok":
+				break;
+		}
+	}
+
 	private getMinDate(): Date {
 		const today = new Date();
 		return new Date(today.getFullYear() - 50, today.getMonth(), today.getDate());
@@ -338,23 +400,15 @@ export class TransactionDialog {
 		return this._dialogDay;
 	}
 
-	get price() {
-		return this._price;
-	}
-
-	set price(price: string) {
-		this._price = price;
-	}
-
 	set dialogMode(mode: DialogMode) {
 		this._dialogMode = mode;
 	}
 
-	set dialogSymbol(value: string) {
-		this._dialogSymbol = value;
+	set dialogMessage(value: string) {
+		this._dialogMessage = value;
 	}
 
-	set dialogFocusedField(focusField: DialogFocusedField) {
-		this._dialogFocusedField = focusField;
+	set dialogSymbol(value: string) {
+		this._dialogSymbol = value;
 	}
 }

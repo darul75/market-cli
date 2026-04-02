@@ -14,14 +14,14 @@ export class HistoricalPriceService {
 		this.apiClient = apiClient || new YahooFinanceClient();
 	}
 
-	async getPriceOnDate(symbol: string, date: string): Promise<number | null> {
+	async getPriceOnDate(symbol: string, date: string, abortSignal?: AbortSignal) {
 		const cacheKey = `${symbol}:${date}`;
 
 		if (this.cache.has(cacheKey)) {
 			return this.cache.get(cacheKey) || null;
 		}
 
-		const price = await this.apiClient.fetchHistoricalPrice(symbol, date);
+		const price = await this.apiClient.fetchHistoricalPrice(symbol, date, abortSignal);
 
 		if (price !== null) {
 			this.cache.set(cacheKey, price);

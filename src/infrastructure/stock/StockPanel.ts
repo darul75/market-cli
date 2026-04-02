@@ -42,10 +42,10 @@ export class StockPanel {
 			| "search" = "none",
 		private $sideEffects: Observable<SideEffect>,
 
-		private openBuyDialog: (symbol: string) => void,
-		private openSellDialog: (symbol: string) => void,
-		private openDeleteConfirmDialog: (symbol: string) => void,
-		private openDeleteTransactionDialog: (symbol: string, transactionId: string) => void,
+		private openBuyDialog: () => void,
+		private openSellDialog: () => void,
+		private openDeleteConfirmDialog: () => void,
+		private openDeleteTransactionDialog: () => void,
 		private triggerAppRendering: () => void
 	) {
 		this.initListeners();
@@ -210,21 +210,15 @@ export class StockPanel {
 			? `${realSign}${displaySymbol}${convertPrice(this._exchangeRates, pos.realizedPL, stockCurrency, this._displayCurrency).toFixed(0)}`
 			: "-";
 
-		const buyBtn = this.createActionButton("📈", "#00FF88", () => this.openBuyDialog(stock.symbol), isSelected, 0);
+		const buyBtn = this.createActionButton("📈", "#00FF88", () => this.openBuyDialog(), isSelected, 0);
 		const sellBtn = this.createActionButton(
 			"📉",
 			"#FF8888",
-			() => this.openSellDialog(stock.symbol),
+			() => this.openSellDialog(),
 			!(!hasPosition || !isSelected),
 			1
 		);
-		const deleteBtn = this.createActionButton(
-			"❌",
-			"#FF0000",
-			() => this.openDeleteConfirmDialog(stock.symbol),
-			isSelected,
-			1
-		);
+		const deleteBtn = this.createActionButton("❌", "#FF0000", () => this.openDeleteConfirmDialog(), isSelected, 1);
 
 		const isExpanded = this.expandedSymbols.has(stock.symbol);
 		const detailsBtn = this.createActionButton(
@@ -379,7 +373,8 @@ export class StockPanel {
 						width: 3,
 						onMouseDown: (e: MouseEvent) => {
 							e.stopPropagation();
-							this.openDeleteTransactionDialog(symbol, t.id);
+							this.selectedTransactionId = t.id;
+							this.openDeleteTransactionDialog();
 						},
 					},
 					Text({ content: "❌", fg: isSelected ? "#FF4444" : "#444444" })

@@ -2,7 +2,8 @@ import { Box, type MouseEvent, Text } from "@opentui/core";
 
 export class DeleteStockTransactionDialog {
 	constructor(
-		private _transactionSymbol: string,
+		public symbol: string,
+		public transactionId: string,
 
 		private confirmDeleteTransaction: () => void,
 		private closeDialog: () => void
@@ -22,7 +23,7 @@ export class DeleteStockTransactionDialog {
 			},
 			Text({ content: "⚠️  DELETE TRANSACTION", fg: "#FF4444", width: 50 }),
 			Box({ width: "100%", height: 1 }),
-			Text({ content: `Remove this transaction from ${this._transactionSymbol}?`, fg: "#FFFFFF", width: 50 }),
+			Text({ content: `Remove this transaction from ${this.symbol}?`, fg: "#FFFFFF", width: 50 }),
 			Box({ width: "100%", height: 1 }),
 			Box(
 				{ width: 50, flexDirection: "row", justifyContent: "center", gap: 3 },

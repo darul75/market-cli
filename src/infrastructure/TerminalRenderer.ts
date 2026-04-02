@@ -21,17 +21,20 @@ import { PortfolioHistoryService, type PortfolioHistorySummary } from "./Portfol
 import { PortfolioStore } from "./PortfolioStore.js";
 import { SearchPanel } from "./search/index.js";
 import { StockPanel } from "./stock/StockPanel.js";
-import type { Currency, DialogFocusedField, DialogMode, GraphRange, SideEffect } from "./types.js";
+import type { Currency, DialogMode, GraphRange, SideEffect } from "./types.js";
 import { YahooFinanceClient } from "./YahooFinanceClient.js";
 
-const APP_VERSION = "0.3.8";
+const APP_VERSION = "0.3.9";
 const CURRENCIES: Currency[] = ["USD", "EUR", "GBP"];
 
 export class TerminalRenderer {
+	private displayCurrency: Currency = "USD";
+
 	private app: StockMonitorApp = new StockMonitorApp();
 
-	private currentProgress: ProgressUpdate | null = null;
 	private renderer!: CliRenderer;
+
+	private currentProgress: ProgressUpdate | null = null;
 	private isInitialized = false;
 	private resizeTimeout?: NodeJS.Timeout;
 	private _marketData: MarketData | null = null;
@@ -42,8 +45,6 @@ export class TerminalRenderer {
 	private footerPanel: FooterPanel | null = null;
 	private searchPanel: SearchPanel | null = null;
 
-	private transactionDialog: TransactionDialog | null = null;
-
 	private expandedSymbols: Set<string> = new Set();
 
 	private positions: Position[] = [];
@@ -51,24 +52,35 @@ export class TerminalRenderer {
 	private historicalPriceService: HistoricalPriceService = new HistoricalPriceService();
 	private dataStream: StockDataStream | null = null;
 
-	private displayCurrency: Currency = "USD";
 	private exchangeRates: Map<string, number> = new Map();
 
 	// dialogs
 	private dialogMode: DialogMode = "none";
-	private dialogSymbol: string = "";
-	private dialogPrice: string = "";
-	private dialogMessage: string = "";
-	private dialogFetchingPrice: boolean = false;
-	private dialogFetchTimer?: NodeJS.Timeout;
-	private dialogTransactionSymbol: string = "";
-	private dialogTransactionId: string = "";
-	private dialogFocusedField: DialogFocusedField = "monthLt";
+	private dialogFetchTimer: NodeJS.Timeout | null = null;
+	private transactionDialog = new TransactionDialog(
+		this.dialogMode,
+		this.stockPanel?.selectedStockSymbol || "",
+		"",
+
+		() => this.closeDialog(),
+		() => this.scheduleDateChangeFetch(),
+		() => this.handleConfirmBuy(),
+		() => this.handleConfirmSell()
+	);
+	private deleteTransactionDialog = new DeleteStockTransactionDialog(
+		"",
+		"",
+		() => this.handleConfirmDeleteTransaction(),
+		() => this.closeDialog()
+	);
 
 	private portfolioHistoryService: PortfolioHistoryService = new PortfolioHistoryService();
 	private graphSelectedRange: GraphRange = "1mo";
 	private graphData: PortfolioHistorySummary | null = null;
 	private graphLoading: boolean = false;
+
+	// http
+	private priceFetchController: AbortController | null = null;
 
 	// observable events
 	private sideEffects = new Subject<SideEffect>();
@@ -81,6 +93,10 @@ export class TerminalRenderer {
 				autoFocus: true,
 				enableMouseMovement: true,
 			});
+
+			if (!this.renderer) {
+				throw new Error("Renderer failed");
+			}
 
 			this.setDataStream(this.app.getDataStream());
 
@@ -117,15 +133,9 @@ export class TerminalRenderer {
 			this.headerPanel = new HeaderPanel(
 				this.displayCurrency,
 				this.$sideEffects,
-				() => {
-					this.openSearchDialog();
-				},
-				() => {
-					this.openPortfolioGraphDialog();
-				},
-				() => {
-					this.handleToggleCurrency();
-				}
+				() => this.openSearchDialog(),
+				() => this.openPortfolioGraphDialog(),
+				() => this.handleToggleCurrency()
 			);
 
 			this.stockPanel = new StockPanel(
@@ -137,10 +147,10 @@ export class TerminalRenderer {
 				this.dialogMode,
 				this.$sideEffects,
 
-				(symbol: string) => this.openBuyDialog(symbol),
-				(symbol: string) => this.openSellDialog(symbol),
-				(symbol: string) => this.openDeleteConfirmDialog(symbol),
-				(symbol: string, transactionId: string) => this.openDeleteTransactionDialog(symbol, transactionId),
+				() => this.openBuyDialog(),
+				() => this.openSellDialog(),
+				() => this.openDeleteConfirmDialog(),
+				() => this.openDeleteTransactionDialog(),
 				() => this.render()
 			);
 
@@ -220,7 +230,7 @@ export class TerminalRenderer {
 			if (sequence === "b" && this.stockPanel?.selectedStockSymbol && this.dialogMode === "none") {
 				const stock = this._marketData?.stocks.find((s) => s.symbol === this.stockPanel?.selectedStockSymbol);
 				if (stock) {
-					this.openBuyDialog(this.stockPanel.selectedStockSymbol);
+					this.openBuyDialog();
 				} else {
 					this.stockPanel.selectedStockSymbol = "";
 					if (this.stockPanel) {
@@ -236,7 +246,7 @@ export class TerminalRenderer {
 				if (stock) {
 					const pos = this.calculatePositionSummary(this.stockPanel.selectedStockSymbol, 0);
 					if (pos.qty > 0) {
-						this.openSellDialog(this.stockPanel.selectedStockSymbol);
+						this.openSellDialog();
 					}
 				} else {
 					this.stockPanel.selectedStockSymbol = "";
@@ -262,7 +272,7 @@ export class TerminalRenderer {
 			if (sequence === "d" && this.stockPanel?.selectedStockSymbol && this.dialogMode === "none") {
 				const stock = this._marketData?.stocks.find((s) => s.symbol === this.stockPanel?.selectedStockSymbol);
 				if (stock) {
-					this.openDeleteConfirmDialog(this.stockPanel.selectedStockSymbol);
+					this.openDeleteConfirmDialog();
 				} else {
 					this.stockPanel.selectedStockSymbol = "";
 					if (this.stockPanel) {
@@ -293,7 +303,7 @@ export class TerminalRenderer {
 				this.dialogMode === "none" &&
 				this.stockPanel.selectedStockSymbol
 			) {
-				this.openDeleteTransactionDialog(this.stockPanel.selectedStockSymbol, this.stockPanel?.selectedTransactioId);
+				this.openDeleteTransactionDialog();
 				return true;
 			}
 
@@ -507,6 +517,37 @@ export class TerminalRenderer {
 	 * Http calls
 	 **/
 
+	private scheduleDateChangeFetch() {
+		if (this.dialogFetchTimer) {
+			clearTimeout(this.dialogFetchTimer);
+		}
+		if (this.priceFetchController) {
+			this.priceFetchController.abort();
+			this.priceFetchController = null;
+		}
+		this.dialogFetchTimer = setTimeout(() => {
+			this.priceFetchController = new AbortController();
+			this.fetchHistoricalPrice(this.priceFetchController.signal);
+		}, 500);
+	}
+
+	async fetchHistoricalPrice(abortSignal?: AbortSignal) {
+		if (!this.stockPanel?.selectedStockSymbol || this.transactionDialog.fetchingPrice) return;
+		const dateStr = `${this.transactionDialog.dialogYear}-${String(this.transactionDialog.dialogMonth + 1).padStart(2, "0")}-${String(this.transactionDialog.dialogDay).padStart(2, "0")}`;
+		this.transactionDialog.fetchingPrice = true;
+		this.render();
+		const price = await this.historicalPriceService.getPriceOnDate(
+			this.stockPanel.selectedStockSymbol,
+			dateStr,
+			abortSignal
+		);
+		this.transactionDialog.fetchingPrice = false;
+		if (price !== null && (this.dialogMode === "buy" || this.dialogMode === "sell")) {
+			this.transactionDialog.price = price.toFixed(2);
+		}
+		this.render();
+	}
+
 	async fetchExchangeRates() {
 		let apiClient: YahooFinanceClient;
 
@@ -603,80 +644,24 @@ export class TerminalRenderer {
 	// ========== Dialog Methods ==========
 
 	private cycleDialogFocus(direction: "left" | "right") {
-		const order: (typeof this.dialogFocusedField)[] = [
-			"monthLt",
-			"monthGt",
-			"dayLt",
-			"dayGt",
-			"yearLt",
-			"yearGt",
-			"qty",
-			"price",
-			"cancel",
-			"ok",
-		];
-		const idx = order.indexOf(this.dialogFocusedField);
-		if (direction === "left") {
-			this.dialogFocusedField = order[(idx - 1 + order.length) % order.length];
-		} else {
-			this.dialogFocusedField = order[(idx + 1) % order.length];
-		}
+		this.transactionDialog.cycleDialogFocus(direction);
 		this.render();
 	}
 
 	private incrementFocusedField() {
-		if (!this.transactionDialog) {
-			return;
-		}
+		this.transactionDialog.incrementFocusedField();
 
-		switch (this.dialogFocusedField) {
-			case "monthLt":
-			case "monthGt":
-				this.transactionDialog.incrementMonth();
-				break;
-			case "dayLt":
-			case "dayGt":
-				this.transactionDialog.incrementDay();
-				break;
-			case "yearLt":
-			case "yearGt":
-				this.transactionDialog.incrementYear();
-				break;
-			case "qty":
-			case "price":
-			case "cancel":
-			case "ok":
-				break;
-		}
+		this.render();
 	}
 
 	private decrementFocusedField() {
-		if (!this.transactionDialog) {
-			return;
-		}
-		switch (this.dialogFocusedField) {
-			case "monthLt":
-			case "monthGt":
-				this.transactionDialog.decrementMonth();
-				break;
-			case "dayLt":
-			case "dayGt":
-				this.transactionDialog.decrementDay();
-				break;
-			case "yearLt":
-			case "yearGt":
-				this.transactionDialog.decrementYear();
-				break;
-			case "qty":
-			case "price":
-			case "cancel":
-			case "ok":
-				break;
-		}
+		this.transactionDialog.decrementFocusedField();
+
+		this.render();
 	}
 
-	private actOnFocusedField(): void {
-		switch (this.dialogFocusedField) {
+	private actOnFocusedField() {
+		switch (this.transactionDialog.dialogFocusedField) {
 			case "cancel":
 				this.closeDialog();
 				break;
@@ -691,74 +676,64 @@ export class TerminalRenderer {
 		}
 	}
 
-	private scheduleDateChangeFetch(): void {
-		if (this.dialogFetchTimer) {
-			clearTimeout(this.dialogFetchTimer);
-		}
-		this.dialogFetchTimer = setTimeout(() => {
-			this.fetchHistoricalPrice();
-		}, 1000);
-	}
-
 	/**
 	 * Dialog visibility / dialog actions
 	 **/
 
-	private openBuyDialog(symbol: string) {
+	private openBuyDialog() {
 		this.dialogMode = "buy";
-		this.dialogSymbol = symbol;
 
-		const stock = this._marketData?.stocks.find((s) => s.symbol === symbol);
-		const convertedPrice = stock ? stock.price.amount : 0;
-		this.dialogPrice = convertedPrice > 0 ? convertedPrice.toFixed(2) : "";
-		this.dialogFetchingPrice = false;
+		const fetch = async () => {
+			await this.fetchHistoricalPrice();
+		};
+
+		if (this.transactionDialog.price === "") {
+			fetch();
+		}
 
 		this.render();
 	}
 
-	private openDeleteConfirmDialog(symbol: string): void {
+	private openDeleteConfirmDialog() {
 		this.dialogMode = "delete";
-		this.dialogSymbol = symbol;
 		this.render();
 	}
 
-	private openDeleteTransactionDialog(symbol: string, transactionId: string): void {
+	private openDeleteTransactionDialog() {
 		this.dialogMode = "deleteTransaction";
-		this.dialogTransactionSymbol = symbol;
-		this.dialogTransactionId = transactionId;
 		this.render();
 	}
 
-	private openHelpDialog(): void {
+	private openHelpDialog() {
 		this.dialogMode = "help";
 		this.render();
 	}
 
-	private openSearchDialog(): void {
-		this.dialogMode = "search";
+	private openSellDialog() {
+		this.dialogMode = "sell";
+
+		const fetch = async () => {
+			await this.fetchHistoricalPrice();
+		};
+
+		if (this.transactionDialog.price === "") {
+			fetch();
+		}
+
+		this.transactionDialog.maxSaleQty = this.getMaxSellQty();
 		this.render();
 	}
 
-	private openSellDialog(symbol: string) {
-		this.dialogMode = "sell";
-		this.dialogSymbol = symbol;
-		this.dialogMessage = "";
-
-		const stock = this._marketData?.stocks.find((s) => s.symbol === symbol);
-		const convertedPrice = stock ? stock.price.amount : 0;
-		this.dialogPrice = convertedPrice > 0 ? convertedPrice.toFixed(2) : "";
-		this.dialogFetchingPrice = false;
-
+	private openSearchDialog() {
+		this.dialogMode = "search";
 		this.render();
 	}
 
 	private closeDialog() {
 		this.dialogMode = "none";
-		this.dialogSymbol = "";
-		this.dialogMessage = "";
-		if (this.transactionDialog) {
-			this.transactionDialog.quantity = "";
-		}
+
+		this.transactionDialog.quantity = "";
+		this.transactionDialog.price = "";
 
 		this.render();
 	}
@@ -775,11 +750,15 @@ export class TerminalRenderer {
 	}
 
 	createDeleteConfirmDialog() {
-		return new DeleteStockDialog(this.dialogSymbol, this.handleDeleteBySymbol, this.closeDialog).render();
+		return new DeleteStockDialog(
+			this.stockPanel?.selectedStockSymbol || "",
+			this.handleDeleteBySymbol,
+			this.closeDialog
+		).render();
 	}
 
 	confirmDelete() {
-		this.handleDeleteBySymbol(this.dialogSymbol);
+		this.handleDeleteBySymbol(this.stockPanel?.selectedStockSymbol || "");
 		this.closeDialog();
 	}
 
@@ -825,8 +804,8 @@ export class TerminalRenderer {
 			return;
 		}
 
-		const stock = this._marketData?.stocks.find((s) => s.symbol === this.dialogSymbol);
-		const name = stock?.name || this.dialogSymbol;
+		const stock = this._marketData?.stocks.find((s) => s.symbol === this.stockPanel?.selectedStockSymbol);
+		const name = stock?.name || this.stockPanel?.selectedStockSymbol || "";
 		const dateStr = `${this.transactionDialog.dialogYear}-${String(this.transactionDialog.dialogMonth + 1).padStart(2, "0")}-${String(this.transactionDialog.dialogDay).padStart(2, "0")}`;
 
 		const priceToStore = userEnteredPrice;
@@ -841,7 +820,12 @@ export class TerminalRenderer {
 			currency: currencyToStore,
 		};
 
-		this.positions = this.portfolioStore.addTransaction(this.dialogSymbol, name, transaction, this.positions);
+		this.positions = this.portfolioStore.addTransaction(
+			this.stockPanel?.selectedStockSymbol || "",
+			name,
+			transaction,
+			this.positions
+		);
 		this.sideEffects.next({ type: "portfolio_positions", data: this.positions });
 
 		this.savePortfolio();
@@ -866,7 +850,7 @@ export class TerminalRenderer {
 			return;
 		}
 
-		const position = this.getPosition(this.dialogSymbol);
+		const position = this.getPosition(this.stockPanel?.selectedStockSymbol || "");
 		if (!position) {
 			return;
 		}
@@ -876,13 +860,13 @@ export class TerminalRenderer {
 		const currentQty = totalBuys - totalSells;
 
 		if (currentQty < qty) {
-			this.dialogMessage = `Max available: ${currentQty} shares`;
+			this.transactionDialog.dialogMessage = `Max available: ${currentQty} shares`;
 			this.render();
 			return;
 		}
 
-		const stock = this._marketData?.stocks.find((s) => s.symbol === this.dialogSymbol);
-		const name = stock?.name || this.dialogSymbol;
+		const stock = this._marketData?.stocks.find((s) => s.symbol === this.stockPanel?.selectedStockSymbol);
+		const name = stock?.name || this.stockPanel?.selectedStockSymbol || "";
 		const dateStr = `${this.transactionDialog.dialogYear}-${String(this.transactionDialog.dialogMonth + 1).padStart(2, "0")}-${String(this.transactionDialog.dialogDay).padStart(2, "0")}`;
 
 		const sellPriceToStore = userEnteredPrice;
@@ -897,7 +881,12 @@ export class TerminalRenderer {
 			currency: sellCurrencyToStore,
 		};
 
-		this.positions = this.portfolioStore.addTransaction(this.dialogSymbol, name, transaction, this.positions);
+		this.positions = this.portfolioStore.addTransaction(
+			this.stockPanel?.selectedStockSymbol || "",
+			name,
+			transaction,
+			this.positions
+		);
 
 		this.sideEffects.next({ type: "portfolio_positions", data: this.positions });
 
@@ -906,10 +895,10 @@ export class TerminalRenderer {
 	}
 
 	private handleConfirmDeleteTransaction() {
-		if (this.dialogTransactionSymbol && this.dialogTransactionId) {
+		if (this.deleteTransactionDialog.symbol && this.deleteTransactionDialog.transactionId) {
 			this.positions = this.portfolioStore.removeTransaction(
-				this.dialogTransactionSymbol,
-				this.dialogTransactionId,
+				this.deleteTransactionDialog.symbol,
+				this.deleteTransactionDialog.transactionId,
 				this.positions
 			);
 			this.savePortfolio();
@@ -932,15 +921,9 @@ export class TerminalRenderer {
 	}
 
 	createDeleteTransactionDialog() {
-		return new DeleteStockTransactionDialog(
-			this.dialogTransactionSymbol,
-			() => {
-				this.handleConfirmDeleteTransaction();
-			},
-			() => {
-				this.closeDialog;
-			}
-		).render();
+		this.deleteTransactionDialog.symbol = this.stockPanel?.selectedStockSymbol || "";
+		this.deleteTransactionDialog.transactionId = this.stockPanel?.selectedTransactioId || "";
+		return this.deleteTransactionDialog.render();
 	}
 
 	createHelpDialog() {
@@ -948,28 +931,11 @@ export class TerminalRenderer {
 	}
 
 	private getMaxSellQty() {
-		const position = this.getPosition(this.dialogSymbol);
+		const position = this.getPosition(this.stockPanel?.selectedStockSymbol || "");
 		if (!position) return 0;
 		const totalBuys = position.transactions.filter((t) => t.type === "BUY").reduce((sum, t) => sum + t.qty, 0);
 		const totalSells = position.transactions.filter((t) => t.type === "SELL").reduce((sum, t) => sum + t.qty, 0);
 		return totalBuys - totalSells;
-	}
-
-	async fetchHistoricalPrice() {
-		if (!this.dialogSymbol || this.dialogFetchingPrice || !this.transactionDialog) return;
-
-		const dateStr = `${this.transactionDialog.dialogYear}-${String(this.transactionDialog.dialogMonth + 1).padStart(2, "0")}-${String(this.transactionDialog.dialogDay).padStart(2, "0")}`;
-
-		this.dialogFetchingPrice = true;
-		this.render();
-
-		const price = await this.historicalPriceService.getPriceOnDate(this.dialogSymbol, dateStr);
-
-		this.dialogFetchingPrice = false;
-		if (price !== null) {
-			this.dialogPrice = price.toFixed(2);
-		}
-		this.render();
 	}
 
 	// dialog creation
@@ -1005,26 +971,7 @@ export class TerminalRenderer {
 	private createTransactionDialog() {
 		if (this.dialogMode === "none" || this.dialogMode === "portfolioGraph") return null;
 
-		if (!this.transactionDialog) {
-			this.transactionDialog = new TransactionDialog(
-				this.dialogMode,
-				this.dialogSymbol,
-				this.dialogFetchingPrice,
-				this.dialogPrice,
-				this.dialogFocusedField,
-				this.dialogMessage,
-				this.getMaxSellQty(),
-
-				() => this.closeDialog(),
-				() => this.scheduleDateChangeFetch(),
-				() => this.handleConfirmBuy(),
-				() => this.handleConfirmSell()
-			);
-		}
-
 		this.transactionDialog.dialogMode = this.dialogMode;
-		this.transactionDialog.price = this.dialogPrice;
-		this.transactionDialog.dialogFocusedField = this.dialogFocusedField;
 		if (this.stockPanel) {
 			this.transactionDialog.dialogSymbol = this.stockPanel.selectedStockSymbol || "";
 		}

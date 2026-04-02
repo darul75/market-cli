@@ -7,22 +7,15 @@ A modern CLI application for monitoring live stock prices in real-time with port
 ## Features
 
 :rocket: **Real-time Updates** - Stock prices update every 60 seconds  
-:mag: **Stock Search** - Search and add any stock from Yahoo Finance  
+:mag: **Stock Search** - Search and add any stock  
 :chart_with_upwards_trend: **Portfolio Tracking** - Track quantities, invested amounts, and total portfolio value  
-:currency_exchange: **BUY/SELL Transactions** - Record buy and sell transactions with historical prices  
-:chart: **Realized & Unrealized P&L** - Track profits/losses from trades and current positions  
-:receipt: **Transaction History** - View all transactions for any stock with date picker  
-:floppy_disk: **Persistent Portfolio** - Portfolio saved to JSON file, survives restarts  
+:currency_exchange: **BUY/SELL Transactions** - Record buy and sell transactions with historical prices
+:chart: **Realized & Unrealized P&L** - Track profits/losses from trades and current positions
+:receipt: **Transaction History** - View all transactions for any stock with date picker
+:floppy_disk: **Persistent Portfolio** - Portfolio saved to JSON file, survives restarts
 :point_down_1: **Interactive Table** - Select rows, move stocks up/down, delete stocks  
 :keyboard: **Keyboard Shortcuts** - Full keyboard control (b/s/d/o/x/h/arrows)  
 
-## Technology Stack
-
-- **[Bun](https://bun.sh)** - Fast JavaScript runtime and package manager
-- **[OpenTUI](https://opentui.com)** - Native terminal UI framework with Zig core
-- **[RxJS](https://rxjs.dev)** - Reactive programming for data streams
-- **[TypeScript](https://typescriptlang.org)** - Type safety and developer experience
-- **Yahoo Finance API** - Real-time stock data via v8 chart endpoint
 
 ## Installation
 
@@ -77,6 +70,9 @@ bun install
 # Build for production
 bun run build
 
+# Run in dev mode
+bun run dev
+
 # Run from source
 bun run src/main.ts
 
@@ -85,32 +81,6 @@ bun run start
 
 # Type checking
 bun run type-check
-```
-
-### Interface Overview
-
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ 📈 Stock Live Monitor                                            🟢 LIVE      │
-└──────────────────────────────────────────────────────────────────────────────┘
-
-Stocks: 1    ↑ 1    ↓ 0                               Sentiment: BULLISH
-
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ #  Symbol   Price     Change  Qty  Invested    Value      Unreal.   Real.   │
-├──────────────────────────────────────────────────────────────────────────────┤
-│ 1  AAPL     251.49    +3.50   10   €2,000     €2,515     +€515     -      │
-└──────────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────┐  ┌────────────────────────┐
-│ 🔍 Search Stocks            │  │ 💼 Portfolio           │
-│ > AAPL_                     │  │     €2,515            │
-│ ┌─────────────────────────┐ │  │   +€515 (+25.7%)      │
-│ │ AAPL  Apple Inc.        │ │  └────────────────────────┘
-│ └─────────────────────────┘ │
-└─────────────────────────────┘
-
-Last: 9:58:05 AM                                      Press Ctrl+C to exit
 ```
 
 ### How to Use
@@ -282,38 +252,6 @@ The portfolio is stored in `data/portfolio.json`:
   ]
 }
 ```
-
-## Development
-
-### Running the App
-
-```bash
-# Type checking
-bun run type-check
-
-# Manual testing
-bun run src/main.ts
-```
-
-### Extending
-
-```bash
-# Type checking
-bun run type-check
-
-# Manual testing
-bun run src/main.ts
-```
-
-### Extending
-
-The modular architecture makes it easy to:
-
-- Add new stock exchanges or indices
-- Integrate different data providers
-- Implement additional UI components
-- Add features like alerts, price targets, or historical charts
-- Export portfolio reports (CSV, PDF)
 
 ## License
 
