@@ -24,7 +24,7 @@ import { StockPanel } from "./stock/StockPanel.js";
 import type { Currency, DialogMode, GraphRange, SideEffect } from "./types.js";
 import { YahooFinanceClient } from "./YahooFinanceClient.js";
 
-const APP_VERSION = "0.4.0";
+const APP_VERSION = "0.4.1";
 const CURRENCIES: Currency[] = ["USD", "EUR", "GBP"];
 
 export class TerminalRenderer {
@@ -154,7 +154,7 @@ export class TerminalRenderer {
 				() => this.openSellDialog(),
 				() => this.openDeleteConfirmDialog(),
 				() => this.openDeleteTransactionDialog(),
-				() => this.openEditTransactionDialog(),
+				(transaction: Transaction) => this.openEditTransactionDialog(transaction),
 				() => this.render()
 			);
 
@@ -306,8 +306,7 @@ export class TerminalRenderer {
 					const position = this.getPosition(this.stockPanel.selectedStockSymbol);
 					if (position) {
 						const tx = position.transactions[txIndex];
-						this.editingTransaction = tx;
-						this.openEditTransactionDialog();
+						this.openEditTransactionDialog(tx);
 					}
 				}
 				return true;
@@ -741,11 +740,10 @@ export class TerminalRenderer {
 		this.render();
 	}
 
-	private openEditTransactionDialog() {
+	private openEditTransactionDialog(transaction: Transaction) {
+		this.editingTransaction = transaction;
 		this.dialogMode = "edit";
-		if (this.editingTransaction) {
-			this.transactionDialog.setForEdit(this.editingTransaction);
-		}
+		this.transactionDialog.setForEdit(transaction);
 		this.render();
 	}
 

@@ -3,8 +3,8 @@ import type { Observable } from "rxjs";
 import type { AppStatus } from "../../application";
 import type { MarketData, Position, Stock } from "../../domain";
 import { calculatePositionSummary } from "../../domain/PositionCalculator.js";
-import { debugLog } from "../../shared/Logger.js";
 import { convertPrice } from "../../shared/CurrencyUtils.js";
+import { debugLog } from "../../shared/Logger.js";
 import type { Currency, SideEffect } from "../types.js";
 
 export class HeaderPanel {
@@ -12,6 +12,7 @@ export class HeaderPanel {
 	private _marketData: MarketData | null = null;
 	private _positions: Position[] = [];
 	private _exchangeRates: Map<string, number> = new Map();
+	private _previousPrices: Map<string, number> = new Map();
 
 	constructor(
 		private _displayCurrency: Currency = "USD",
@@ -129,45 +130,103 @@ export class HeaderPanel {
 
 	private createPortfolioTotalBox() {
 		const total = this.getPortfolioTotal();
+		const dayGain = this.getDayGain();
 		const currencySymbol = this._displayCurrency === "EUR" ? "€" : "$";
-		const valueStr = `${currencySymbol}${total.value.toFixed(0)}`;
-		const plSign = total.pl >= 0 ? "+" : "";
-		const plColor = total.pl >= 0 ? "#00FF00" : "#FF0000";
-		const plStr = `${plSign}${currencySymbol}${total.pl.toFixed(0)} (${plSign}${total.plPercent.toFixed(1)}%)`;
 
 		const hasTransactions = this._positions.some((p) => p.transactions.length > 0);
+		if (!hasTransactions) {
+			return Box();
+		}
+
+		const dayGainSign = dayGain.value >= 0 ? "+" : "";
+		const dayGainColor = dayGain.value >= 0 ? "#00FF00" : "#FF0000";
+		const dayGainStr = `${dayGainSign}${currencySymbol}${dayGain.value.toFixed(0)} ${dayGainSign}${dayGain.percent.toFixed(2)}%`;
+
+		const totalGainSign = total.pl >= 0 ? "+" : "";
+		const totalGainColor = total.pl >= 0 ? "#00FF00" : "#FF0000";
+		const totalGainStr = `${totalGainSign}${currencySymbol}${total.pl.toFixed(0)} ${totalGainSign}${total.plPercent.toFixed(2)}%`;
 
 		return Box(
 			{
 				id: "portfolio-total",
 				flexDirection: "row",
-				gap: 2,
+				gap: 3,
 				paddingLeft: 1,
 				paddingRight: 1,
 			},
-			Text({
-				content: valueStr,
-				fg: "#FFFFFF",
-			}),
-			Text({
-				content: plStr,
-				fg: plColor,
-			}),
-			hasTransactions
-				? Box(
-						{
-							width: 3,
-							height: 1,
-							backgroundColor: "#222244",
-							onMouseDown: (e: MouseEvent) => {
-								e.stopPropagation();
-								this.openPortfolioGraphDialog();
-							},
-						},
-						Text({ content: "📊", width: 2, fg: "#00BFFF" })
-					)
-				: Box({ width: 3 })
+			Box(
+				{
+					flexDirection: "row",
+					gap: 1,
+				},
+				Text({ content: "Day gain", fg: "#888888" }),
+				Text({ content: dayGainStr, fg: dayGainColor })
+			),
+			Box(
+				{
+					flexDirection: "row",
+					gap: 1,
+				},
+				Text({ content: "Total gain", fg: "#888888" }),
+				Text({ content: totalGainStr, fg: totalGainColor })
+			),
+			Box(
+				{
+					width: 2,
+					height: 1,
+					backgroundColor: "#222244",
+					onMouseDown: (e: MouseEvent) => {
+						e.stopPropagation();
+						this.openPortfolioGraphDialog();
+					},
+				},
+				Text({ content: "📊", width: 1, fg: "#00BFFF" })
+			)
 		);
+	}
+
+	getDayGain(): { value: number; percent: number } {
+		let dayChange = 0;
+		let dayChangeBase = 0;
+
+		for (const position of this._positions) {
+			const stock = this._marketData?.getStock(position.symbol);
+			if (!stock || position.transactions.length === 0) continue;
+
+			const currentPrice = stock.price.amount;
+			const previousPrice = this._previousPrices.get(position.symbol) || currentPrice;
+			const stockCurrency = stock.price.currency;
+
+			const summary = this.calculatePositionSummary(position.symbol, currentPrice);
+			const qty = summary.qty;
+
+			const previousValue = qty * previousPrice;
+			const currentValue = qty * currentPrice;
+			const positionDayChange = currentValue - previousValue;
+
+			try {
+				const convertedDayChange = convertPrice(
+					this._exchangeRates,
+					positionDayChange,
+					stockCurrency,
+					this._displayCurrency
+				);
+				const convertedPreviousValue = convertPrice(
+					this._exchangeRates,
+					previousValue,
+					stockCurrency,
+					this._displayCurrency
+				);
+
+				dayChange += convertedDayChange;
+				dayChangeBase += convertedPreviousValue;
+			} catch (error) {
+				debugLog(`⚠️ Skipping ${position.symbol} in day gain due to currency conversion error: ${error}`);
+			}
+		}
+
+		const percent = dayChangeBase > 0 ? (dayChange / dayChangeBase) * 100 : 0;
+		return { value: dayChange, percent };
 	}
 
 	getPortfolioTotal(): { value: number; invested: number; pl: number; plPercent: number } {
@@ -238,5 +297,9 @@ export class HeaderPanel {
 
 	set marketData(marketData: MarketData) {
 		this._marketData = marketData;
+		this._previousPrices.clear();
+		for (const stock of marketData.stocks) {
+			this._previousPrices.set(stock.symbol, stock.previousPrice.amount);
+		}
 	}
 }

@@ -26,9 +26,6 @@ export type DialogFocusedField =
 
 export type GraphRange = "1d" | "5d" | "1mo" | "6mo" | "ytd" | "1y" | "5y" | "max";
 
-export const SideEffectType = ["delete_symbol", "exchange_rates", "portfolio_positions"] as const;
-export type SideEffectType = (typeof SideEffectType)[number];
-
 export type SideEffect =
 	| { type: "currency"; data: Currency }
 	| { type: "delete_symbol"; index: number; stock: Stock }

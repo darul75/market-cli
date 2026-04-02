@@ -8,7 +8,7 @@ export class PortfolioGraphDialog {
 	constructor(
 		private _graphRange: GraphRange = "1mo",
 		private _graphLoading: boolean = false,
-		private _graphData: PortfolioHistorySummary | null = null,
+		private graphData: PortfolioHistorySummary | null = null,
 		private displayCurrency: string,
 
 		private changeGraphRange: (range: GraphRange) => Promise<void>,
@@ -55,10 +55,10 @@ export class PortfolioGraphDialog {
 					Text({ content: "Loading chart data...", fg: "#888888" })
 				)
 			);
-		} else if (this._graphData && this._graphData.dataPoints.length > 0) {
-			const chartResult = renderWithGradient(this._graphData.dataPoints, 35, 10);
-			const changeColor = this._graphData.change >= 0 ? "#00FF00" : "#FF0000";
-			const changeSign = this._graphData.change >= 0 ? "+" : "";
+		} else if (this.graphData && this.graphData.dataPoints.length > 0) {
+			const chartResult = renderWithGradient(this.graphData.dataPoints, 35, 10);
+			const changeColor = this.graphData.change >= 0 ? "#00FF00" : "#FF0000";
+			const changeSign = this.graphData.change >= 0 ? "+" : "";
 
 			const displaySymbol = getNativeCurrencySymbol(this.displayCurrency);
 
@@ -69,20 +69,20 @@ export class PortfolioGraphDialog {
 				Box({ width: "100%", height: 1 }),
 				Box(
 					{ width: "100%", flexDirection: "row", justifyContent: "space-between" },
-					Text({ content: `Min: ${displaySymbol}${this._graphData.minValue.toFixed(0)}`, fg: "#FF6666" }),
-					Text({ content: `Max: ${displaySymbol}${this._graphData.maxValue.toFixed(0)}`, fg: "#00FF00" })
+					Text({ content: `Min: ${displaySymbol}${this.graphData.minValue.toFixed(0)}`, fg: "#FF6666" }),
+					Text({ content: `Max: ${displaySymbol}${this.graphData.maxValue.toFixed(0)}`, fg: "#00FF00" })
 				),
 				Box({ width: "100%", height: 1 }),
 				Box(
 					{ width: "100%", flexDirection: "row", justifyContent: "space-between" },
-					Text({ content: `Start: ${displaySymbol}${this._graphData.startValue.toFixed(0)}`, fg: "#888888" }),
-					Text({ content: `Now: ${displaySymbol}${this._graphData.currentValue.toFixed(0)}`, fg: "#FFFFFF" })
+					Text({ content: `Start: ${displaySymbol}${this.graphData.startValue.toFixed(0)}`, fg: "#888888" }),
+					Text({ content: `Now: ${displaySymbol}${this.graphData.currentValue.toFixed(0)}`, fg: "#FFFFFF" })
 				),
 				Box({ width: "100%", height: 1 }),
 				Box(
 					{ width: "100%", flexDirection: "row", justifyContent: "center" },
 					Text({
-						content: `${changeSign}${displaySymbol}${this._graphData.change.toFixed(0)} (${changeSign}${this._graphData.changePercent.toFixed(2)}%)`,
+						content: `${changeSign}${displaySymbol}${this.graphData.change.toFixed(0)} (${changeSign}${this.graphData.changePercent.toFixed(2)}%)`,
 						fg: changeColor,
 					})
 				)

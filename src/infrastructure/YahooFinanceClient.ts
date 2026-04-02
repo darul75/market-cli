@@ -113,6 +113,20 @@ export class YahooFinanceClient {
 				case "6mo":
 					period1 = Math.floor((now.getTime() - 190 * 24 * 60 * 60 * 1000) / 1000);
 					break;
+				case "ytd": {
+					const startOfYear = new Date(now.getFullYear(), 0, 1);
+					period1 = Math.floor(startOfYear.getTime() / 1000);
+					break;
+				}
+				case "1y":
+					period1 = Math.floor((now.getTime() - 365 * 24 * 60 * 60 * 1000) / 1000);
+					break;
+				case "5y":
+					period1 = Math.floor((now.getTime() - 365 * 5 * 24 * 60 * 60 * 1000) / 1000);
+					break;
+				case "max":
+					period1 = Math.floor((now.getTime() - 365 * 10 * 24 * 60 * 60 * 1000) / 1000);
+					break;
 				default:
 					period1 = Math.floor((now.getTime() - 35 * 24 * 60 * 60 * 1000) / 1000);
 			}

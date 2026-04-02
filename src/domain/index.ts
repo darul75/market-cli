@@ -4,7 +4,6 @@ export { MarketData } from "./MarketData.js";
 export type { SearchResult } from "./SearchResult.js";
 export type { Position, Transaction, TransactionWithPL, PositionSummary, TransactionType } from "./Position.js";
 
-// Domain types
 export interface StockData {
 	symbol: string;
 	name: string;

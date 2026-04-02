@@ -1,6 +1,6 @@
 import { Box, BoxRenderable, type CliRenderer, type MouseEvent, ScrollBoxRenderable, Text } from "@opentui/core";
 import type { Observable } from "rxjs";
-import type { MarketData, Position, Stock } from "../../domain/index.js";
+import type { MarketData, Position, Stock, Transaction } from "../../domain/index.js";
 import { calculatePositionSummary, calculateTransactionsWithPL } from "../../domain/PositionCalculator.js";
 import { convertPrice, getNativeCurrencySymbol } from "../../shared/CurrencyUtils.js";
 import { debugLog } from "../../shared/Logger.js";
@@ -48,7 +48,7 @@ export class StockPanel {
 		private openSellDialog: () => void,
 		private openDeleteConfirmDialog: () => void,
 		private openDeleteTransactionDialog: () => void,
-		private openEditTransactionDialog: () => void,
+		private openEditTransactionDialog: (transaction: Transaction) => void,
 		private triggerAppRendering: () => void
 	) {
 		this.initListeners();
@@ -378,7 +378,7 @@ export class StockPanel {
 							e.stopPropagation();
 							this.selectedTransactionId = t.id;
 							this.selectedTransactionIndex = idx;
-							this.openEditTransactionDialog();
+							this.openEditTransactionDialog(t);
 						},
 					},
 					Text({ content: "✏️", fg: isSelected ? "#00FFFF" : "#444444" })
